@@ -1,0 +1,12 @@
+.deps/
+openfst/Makefile
+openfst/config.*
+openfst/libtool
+openfst/**/Makefile
+openfst/stamp*
+openfst/**/stamp*
+*.egg-info/
+build/
+tmp/
+*~
+__pycache__/
