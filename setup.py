@@ -9,34 +9,22 @@ import os
 try:
     import pybind11
 except ImportError:
-    os.system('pip install pybind11')
+    r = os.system('pip install pybind11')
+    assert r
     import pybind11
 
-# TODO: check if openfst is installed
-# otherwise compile it and install
-
-if not os.path.exists(os.path.join(sys.prefix, 'include', 'fst')):
+if (not os.path.exists(os.path.join(sys.prefix, 'include', 'fst'))
+    or 'mfl_hack' not in open(os.path.join(sys.prefix, 'include', 'fst', 'script', 'fst-class.h'), 'r').read()):
     # then there are no open fst headers where we expect them
     # -__-
-    os.system('cd {dir} && ./configure --prefix={prefix} --enable-grm --enable-bin --enable-ngram-fsts --enable-compact-fsts && make -j {threads} && make install'.format(
-        dir=os.path.dirname(__file__),
+    cmd = "cd {dir} && ./configure CXX='g++ -g' CC='gcc -g' prefix={prefix} --enable-grm --enable-bin --enable-ngram-fsts --enable-compact-fsts && make -j {threads} && make install".format(
+        dir=os.path.join(os.path.dirname(os.path.abspath(__file__)), 'openfst'),
         prefix=sys.prefix,
         threads=max(os.cpu_count() - 2, 1)
-    ))
-
-
-# class get_pybind_include(object):
-#     """Helper class to determine the pybind11 include path
-#     The purpose of this class is to postpone importing pybind11
-#     until it is actually installed, so that the ``get_include()``
-#     method can be invoked. """
-
-#     def __init__(self, user=False):
-#         self.user = user
-
-#     def __str__(self):
-#         import pybind11
-#         return pybind11.get_include(self.user)
+    )
+    print(cmd)
+    r = os.system(cmd)
+    assert r
 
 
 ext_modules = [

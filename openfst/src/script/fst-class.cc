@@ -122,5 +122,12 @@ VectorFstClass::VectorFstClass(const string &arc_type)
 VectorFstClass::VectorFstClass(const FstClass &other)
     : MutableFstClass(GetVFSTRegisterEntry(other.ArcType()).converter(other)) {}
 
+  // this is here so we can access the io_register object which is static to this file
+  void __mfl_hack_VectorFSTRegister(string name, IORegistration<VectorFstClass>::Entry* entry) {
+    static auto *io_register =
+      IORegistration<VectorFstClass>::Register::GetRegister();
+    io_register->SetEntry(name, *entry);
+  }
+
 }  // namespace script
 }  // namespace fst
