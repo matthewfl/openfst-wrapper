@@ -9,7 +9,9 @@
 #include <fst/arc.h>
 #include <fst/script/fst-class.h>
 #include <fst/script/arc-class.h>
+#include <fst/script/register.h>
 
+#include <assert.h>
 
 
 using namespace std;
@@ -26,34 +28,39 @@ public:
 };
 
 class FSTWeight {
+  FSTWeight(int32 g) : impl(nullptr), created(g) {} // temp to debug the creation
 public:
 
   // the python object that we are wrapping
-  py::object impl;
+  int32_t created = 0;
+  py::handle impl;
 
-  FSTWeight() = default;
+  FSTWeight() : impl(nullptr) {}
+
   FSTWeight(py::object i) : impl(i) {
-    if(i.is_none())
+    if(impl.is_none())
       throw fsterror("Can not have a None edge weight");
+    impl.inc_ref();
+    created = 0xdeadbeef;
   }
 
   static const FSTWeight& Zero() {
-    static const FSTWeight zero = FSTWeight();
+    static const FSTWeight zero = FSTWeight(123);
     return zero;
   }
   static const FSTWeight& One() {
-    static const FSTWeight one = FSTWeight();
+    static const FSTWeight one = FSTWeight(456);
     return one;
   }
   static const FSTWeight& NoWeight() {
-    static const FSTWeight no_weight = FSTWeight();
+    static const FSTWeight no_weight = FSTWeight(789);
     return no_weight;
   }
 
   static const string& Type() {
     // TODO: this is wrong
     // we should register our own type of weight, but for some reason that isn't working????
-    static const string type("tropical");
+    static const string type("python"); //tropical");
     return type;
   }
 
@@ -72,12 +79,16 @@ public:
     return FSTWeight(impl.attr("quantize")(delta));
   }
 
-  std::istream &Read(std::istream &strm) { throw fsterror("not implemented"); }
-  std::ostream &Write(std::ostream &strm) { throw fsterror("not implemented"); }
+  std::istream &Read(std::istream &strm) const { throw fsterror("not implemented"); }
+  std::ostream &Write(std::ostream &strm) const { throw fsterror("not implemented"); }
 
   size_t Hash() const {
     py::object r = impl.attr("__hash__")();
     return r.cast<size_t>();
+  }
+
+  virtual ~FSTWeight() {
+    impl.dec_ref();
   }
 
 };
@@ -128,104 +139,46 @@ inline bool operator==(FSTWeight const &w1, FSTWeight const &w2) {
   return r.cast<bool>();
 }
 
+inline bool operator!=(FSTWeight const &w1, FSTWeight const &w2) {
+  return !(w1 == w2);
+}
+
 std::ostream &operator<<(std::ostream &os, const FSTWeight &w) {
-  return os << py::str(w.impl.attr("__str__"));
+  //return os << py::str(w.impl.attr(u8"__str__")());
+  return os << "the python type\n";
+}
+
+std::istream &operator>>(std::istream &is, const FSTWeight &w) {
+  throw fsterror("python weights do not support loading");
 }
 
 
-//using FSTClass = MutableFstClass<ArcTpl<FSTWeight> >;
+using PyArc = ArcTpl<FSTWeight>;
 
-// class WeightBase;
-
-using Arc = ArcTpl<FSTWeight>;
-
-static FstRegister < Arc > our_weights;
-
+static FstRegister < PyArc > our_weights;
 
 MutableFstClass* create_fst() {
-  //return MutableFstClass::Create
-  //return *nullptr;
-  //return MutableFstClass::Read(""); // read the empty string file to get an empty FST instance
 
-  // before we attempt to construct the FST, ensure that we are loaded into openfst list of classes
-  // can't seem to do this "right"
-  // auto r = FstClassIoRegister::GetRegister();
-  // r->
+  // register the arc type class as can't get this to work normally
+  // we might be getting loaded before the other shared object, which I guess is causing us to be unable
+  // to properly register or something????
 
-  MutableFstClass* r = new VectorFstClass("standard") ;///Arc::Type());
-  //r->GetMutableFst<Arc>()->SetArcType(Arc::Type());
+  // REGISTER_FST_WEIGHT(FSTWeight);
+  // REGISTER_FST_CLASSES(PyArc);
+
+  static auto *io_register =
+    IORegistration<VectorFstClass>::Register::GetRegister();
+  io_register->SetEntry(PyArc::Type(),
+                        IORegistration<VectorFstClass>::Entry(
+                                                              VectorFstClass::Read<PyArc>,
+                                                              VectorFstClass::Create<PyArc>,
+                                                              VectorFstClass::Convert<PyArc>));
+
+
+  MutableFstClass* r = new VectorFstClass(PyArc::Type());
   return r;
 
-  // stringstream ss("");
-
-  // std::unique_ptr<MutableFstClass> fst(MutableFstClass::Read(ss, true));
-  // MutableFstClass *r = MutableFstClass::Read<Arc>(ss, FstReadOptions());
-  // return r;
-
-  // // this is apparently the way that openfst wants to do this....omfg
-  // FstClass *fst = new FstClass();
-  // return static_cast<MutableFstClass*>(fst);
 }
-
-// // wrap the python class object into the fst
-// class FSTWeightWrap : public WeightImplBase {
-//   py::object wrapped;
-
-//   //WeightBase &self() { return wrapped.cast<WeightBase&>(); }
-// public:
-
-//   virtual FSTWeightWrap *Copy() const {
-//     // FSTWeightWrap *r = new FSTWeightWrap;
-//     // r->wrapped = wrapped.attr("clone")();
-//     // return r;
-//     return nullptr;
-//   }
-//   virtual void Print(std::ostream *o) const {
-//     *o << ToString();
-//   }
-//   virtual const string &Type() const {
-//     static const string t("WrappedPythonWeight");
-//     return t;
-//   }
-//   virtual string ToString() const {
-//     return py::str(wrapped.attr("__str__")());
-//   }
-//   virtual bool operator==(const WeightImplBase &other) const {
-//     py::object r = wrapped.attr("equal")(static_cast<FSTWeightWrap>(&other)->wrapped);
-//     return r.cast<bool>();
-//   }
-//   virtual bool operator!=(const WeightImplBase &other) const {
-//     return !((*this) == other);
-//   }
-//   virtual WeightImplBase &PlusEq(const WeightImplBase &other) {
-//     wrapped = wrapped.attr("plus")(static_cast<FSTWeightWrap>(&other)->wrapped);
-//     return *this;
-//   }
-//   virtual WeightImplBase &TimesEq(const WeightImplBase &other) {
-//     wrapped = wrapped.attr("times")(static_cast<FSTWeightWrap>(&other)->wrapped);
-//     return *this;
-//   }
-//   virtual WeightImplBase &DivideEq(const WeightImplBase &other) {
-//     wrapped = wrapped.attr("divide")(static_cast<FSTWeightWrap>(&other)->wrapped);
-//     return *this;
-//   }
-//   virtual WeightImplBase &PowerEq(size_t n) {
-//     wrapped = wrapped.attr("power")(n);
-//     return *this;
-//   }
-//   virtual ~FSTWeightWrap() {}
-// };
-
-// class WeightBase {
-// public:
-//   virtual py::object create()=0;
-//   virtual py::object add(WeightBase *other)=0;
-// };
-
-// class PyWeightBase : public WeightBase {
-// public:
-
-// };
 
 bool add_arc(MutableFstClass &self, int64 from, int64 to,
              int64 input_label, int64 output_label, py::object weight) {
@@ -241,16 +194,21 @@ bool add_arc(MutableFstClass &self, int64 from, int64 to,
 }
 
 void set_final(MutableFstClass &self, int64 state, py::object weight) {
-   if(weight.is_none()) {
+  if(weight.is_none()) {
     throw fsterror("weight can not be None");
   }
+  //cout << weight;
   FSTWeight w1(weight);
   WeightClass w2(w1);
   self.SetFinal(state, w2);
 }
 
-py::object final_weight(MutableFstClass &self, int64 state) {
-  return self.GetMutableFst<Arc>()->Final(state).impl;
+void final_weight(MutableFstClass &self, int64 state) {
+  FSTWeight finalW = self.GetMutableFst<PyArc>()->Final(state);
+  py::handle r =  finalW.impl;
+  string s = r.attr("__str__")().cast<string>();
+  cout << s;
+  //return r;
 }
 
 PYBIND11_MODULE(openfst_wrapper_backend, m) {

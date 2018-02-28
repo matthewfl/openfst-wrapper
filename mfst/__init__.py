@@ -54,6 +54,7 @@ class Weight(object):
 
     def member(self):
         # check that this is a member of the semiring
+        # this is just a nan check atm
         return self._value == self._value
 
     def quantize(self, delta=.5):
@@ -63,7 +64,7 @@ class Weight(object):
     # These methods are provided to make the python interface work but are not directly used
 
     def __str__(self):
-        return self._value
+        return str(self._value)
 
     def __add__(self, other):
         return self.add(other)
