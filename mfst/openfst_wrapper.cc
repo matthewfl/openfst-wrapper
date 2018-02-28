@@ -247,12 +247,12 @@ bool add_arc(MutableFstClass &self, int64 from, int64 to,
   if(!check_is_weight(weight)) {
     throw fsterror("weight is missing required method");
   }
-  weight.inc_ref();
-  weight.inc_ref();
-  weight.inc_ref();
-  weight.inc_ref();
-  weight.inc_ref();
-  weight.inc_ref();
+  // weight.inc_ref();
+  // weight.inc_ref();
+  // weight.inc_ref();
+  // weight.inc_ref();
+  // weight.inc_ref();
+  // weight.inc_ref();
 
 
   FSTWeight w1(weight);
@@ -272,11 +272,11 @@ void set_final(MutableFstClass &self, int64 state, py::object weight) {
   if(!check_is_weight(weight)) {
     throw fsterror("weight is missing required method");
   }
-  weight.inc_ref();
-  weight.inc_ref();
-  weight.inc_ref();
-  weight.inc_ref();
-  weight.inc_ref();
+  // weight.inc_ref();
+  // weight.inc_ref();
+  // weight.inc_ref();
+  // weight.inc_ref();
+  // weight.inc_ref();
 
   //cout << weight;
   FSTWeight w1(weight);
@@ -287,20 +287,30 @@ void set_final(MutableFstClass &self, int64 state, py::object weight) {
 py::object final_weight(MutableFstClass &self, int64 state) {
   //MutableFstClass self = pself.cast<MutableFstClass*>();
   FSTWeight finalW = self.GetMutableFst<PyArc>()->Final(state);
-  assert(!finalW.isBuiltIn());
+  if(finalW.isBuiltIn()) {
+    if(finalW.flags == FSTWeight::isZero) {
+      return py::cast(0);
+    } else if(finalW.flags == FSTWeight::isOne) {
+      return py::cast(1);
+    } else {
+      // invalid
+      return py::cast("FST INVALID");
+    }
+  }
 
-  //PyInt_fromLong
+  assert(finalW.flags == FSTWeight::isSet);
 
   py::object r =  finalW.impl; // this should still be holding onto the handle
   //assert(finalW.created == 0xdeadbeef);
-  r.inc_ref();
-  r.inc_ref();
-  r.inc_ref();
-  r.inc_ref();
-  r.inc_ref();
-  r.inc_ref();
-  r.inc_ref();
-  r.inc_ref();
+
+  // r.inc_ref();
+  // r.inc_ref();
+  // r.inc_ref();
+  // r.inc_ref();
+  // r.inc_ref();
+  // r.inc_ref();
+  // r.inc_ref();
+  // r.inc_ref();
 
 
   // py::handle s = r.attr("__str__");
@@ -314,13 +324,13 @@ PYBIND11_MODULE(openfst_wrapper_backend, m) {
 
   py::class_<MutableFstClass>(m, "FSTBase")
     .def(py::init<>(&create_fst))
-#define d(name) .def(#name, &MutableFstClass:: name)
-    .def("AddArc", &add_arc) // keep the weight alive when added
+#define d(name) .def("_" #name, &MutableFstClass:: name)
+    .def("_AddArc", &add_arc) // keep the weight alive when added
     //d(AddArc)
     d(AddState)
     // there are more than one method with this name but different type signatures
-    .def("DeleteArcs", [](MutableFstClass* m, int64 v) { if(m) m->DeleteArcs(v); })
-    .def("DeleteStates", [](MutableFstClass *m) { if(m) m->DeleteStates(); })
+    .def("_DeleteArcs", [](MutableFstClass* m, int64 v) { if(m) m->DeleteArcs(v); })
+    .def("_DeleteStates", [](MutableFstClass *m) { if(m) m->DeleteStates(); })
 
     d(NumStates)
     d(ReserveArcs)
@@ -329,15 +339,13 @@ PYBIND11_MODULE(openfst_wrapper_backend, m) {
     //d(SetOutputSymbols)
 
     //d(SetFinal)
-    .def("SetFinal", &set_final)
+    .def("_SetFinal", &set_final)
     d(SetStart)
 
-
-    d(Final)
     d(NumArcs)
     d(Start)
 
-    .def("FinalWeight", &final_weight)
+    .def("_FinalWeight", &final_weight)
 
     ;
 #undef d
