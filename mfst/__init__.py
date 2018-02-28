@@ -1,5 +1,6 @@
 import openfst_wrapper_backend as _backend
 
+
 class WeightBase(object):
 
     @classmethod
@@ -52,6 +53,24 @@ class WeightBase(object):
     def _quantize(self):
         """
         Return a new instance that is bucketed
+        """
+        raise NotImplementedError()
+
+    def _reverse(self):
+        """
+        Return a weight that represent reversing this edge
+        """
+        return self
+
+    def _sampling_weight(self):
+        """
+        Return a positive unnormalized floating point value that can be used to sample this arc
+        """
+        raise NotImplementedError()
+
+    def _approx_eq(self, other, delta):
+        """
+        Returns if this weight is approximatly equal to another other less than delta
         """
         raise NotImplementedError()
 
@@ -125,6 +144,13 @@ class _WeightWrapper(WeightBase):
         # quantize the weight into buckets
         return self
 
+    def _sampling_weight(self):
+        # just make the sampling of these path weights uniform
+        return 1
+
+    def _approx_eq(self, other, delta):
+        return abs(self._value - other._value) < delta
+
     def __str__(self):
         return str(self._value)
 
@@ -160,7 +186,8 @@ class FST(_backend.FSTBase):
                 return self._weight_class.zero()
             elif w == 1:
                 return self._weight_class.one()
-        if isinstance(w, str) and w == 'FST INVALID':
+        if isinstance(w, str) and w == '__FST_INVALID__':
+            # this can be returned by the C++ binding in the case that there is an invalid state
             return None
         return self._weight_class(w)
 
@@ -177,6 +204,24 @@ class FST(_backend.FSTBase):
         Return the number of arcs in the fst
         """
         return self._NumArcs()
+
+    @property
+    def start_state(self):
+        """
+        Return the state id of the starting state
+        """
+        return self._Start()
+
+    @start_state.setter
+    def start_state(self, state):
+        """
+        Mark a state as the start state
+        """
+        assert (state >= 0 and state < self.num_states), "Invalid state id"
+        return self._SetStart(state)
+
+    def set_start_state(self, state):
+        self.start_state = state
 
     def add_state(self):
         """
@@ -224,9 +269,122 @@ class FST(_backend.FSTBase):
         assert (state >= 0 and state < self.num_states), "Invalid state id"
         return self._make_weight(self._FinalWeight(state))
 
-    def set_start_state(self, state):
+    def get_arcs(self, state):
         """
-        Mark a state as the start state
+        Return the arcs coming out of some state
         """
-        assert (state >= 0 and state < self.num_states), "Invalid state id"
-        return self._SetStart(state)
+        raise NotImplementedError()  # TODO
+
+    def isomorphic(self, other, delta=1.0/1024):
+        """
+        This operation determines if two transducers with a certain required
+        determinism have the same states, irrespective of numbering, and the
+        same transitions with the same labels and weights, irrespective of
+        ordering. In other words, Isomorphic(A, B) is true if and only if the
+        states of A can be renumbered and the transitions leaving each state
+        reordered so that Equal(A, B) is true.
+
+        http://www.openfst.org/twiki/bin/view/FST/IsomorphicDoc
+
+        uses WeightBase._approx_eq to compare wieghts.
+        delta: 32 bit floating point number that is passed to _approx_eq
+        """
+        return self._Isomorphic(other, delta)
+
+    # methods for changing the fst given anther fst
+    def concat(self, other):
+        """
+        This operation computes the concatenation (product) of two FSTs. If A
+        transduces string x to y with weight a and B transduces string w to v
+        with weight b, then their concatenation transduces string xw to yv with
+        weight a (times) b.
+
+        http://www.openfst.org/twiki/bin/view/FST/ConcatDoc
+        """
+        assert isinstance(other, FST)
+        return self._Concat(other)
+
+    def compose(self, other):
+        """
+        This operation computes the composition of two transducers. If A transduces
+        string x to y with weight a and B transduces y to z with weight b, then their
+        composition transduces string x to z with weight a (times) b.
+
+        http://www.openfst.org/twiki/bin/view/FST/ComposeDoc
+        """
+        assert isinstance(other, FST)
+        return self._Compose(other)
+
+    def determinize(self, delta=1.0/1024, weight_threshold=None):
+        """
+        This operation determinizes a weighted transducer. The result will be an
+        equivalent FST that has the property that no state has two transitions
+        with the same input label. For this algorithm, epsilon transitions are
+        treated as regular symbols (cf. RmEpsilon).
+
+        http://www.openfst.org/twiki/bin/view/FST/DeterminizeDoc
+
+        delta: Quantization delta for subset weights.
+        weight_threshold: Pruning weight threshold.
+        """
+        if weight_threshold is None:
+            weight_threshold = self._weight_class()
+
+        return self._Determinize(delta, self._make_weight(weight_threshold))
+
+    def project(self, type='input'):
+        """
+        This operation projects an FST onto its domain or range by either copying
+        each arc's input label to its output label or vice versa.
+
+        http://www.openfst.org/twiki/bin/view/FST/ProjectDoc
+        """
+
+        if type == 'output':
+            t = 0
+        elif type == 'intput':
+            t = 1
+        else:
+            raise RuntimeError("unknown project type " + type)
+        return self._Project(t)
+
+    def difference(self, other):
+        """
+        This operation computes the difference between two FSAs. Only strings that
+        are in the first automaton but not in second are retained in the
+        result.
+
+        http://www.openfst.org/twiki/bin/view/FST/DifferenceDoc
+        """
+        assert isinstance(other, FST)
+        assert False  # TODO
+
+    def invert(self):
+        """
+        This operation inverts the transduction corresponding to an FST by
+        exchanging the FST's input and output labels.
+
+        http://www.openfst.org/twiki/bin/view/FST/InvertDoc
+        """
+        assert False  # TODO
+
+    def prune(self, weight):
+        """
+        This operation deletes states and arcs in the input FST that do not belong
+        to a successful path whose weight is no more (w.r.t the natural the
+        natural semiring order) than the threshold t otimes the weight of the
+        shortest path in the input FST.
+
+        http://www.openfst.org/twiki/bin/view/FST/PruneDoc
+        """
+        assert False
+
+    def random_path(self, arc_selector=None):
+        """
+
+
+        http://www.openfst.org/twiki/bin/view/FST/RandGenDoc
+        """
+        if not arc_selector:
+            # convert the weight to a scalar that we can use to sample different paths
+            arc_selector = lambda weight: 1  # uniform

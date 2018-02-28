@@ -13,17 +13,21 @@ class MyWeight(mfst.WeightBase):
         self._value = v
         num_weights += 1
 
-    def add(self, other):
+    def __add__(self, other):
         print('hi from add')
         return super().add(other)
 
-    def multiply(self, other):
+    def __mul__(self, other):
         print('hi from mul')
         return super().multiply(other)
 
-    def equal(self, other):
+    def __eq__(self, other):
         print('hi from equal')
         return super(self).equal(other)
+
+    def _approx_eq(self, other, delta):
+        print('hi from approx eq')
+        return self == other
 
     def __del__(self):
         global num_weights
@@ -43,7 +47,7 @@ for i in range(10):
 for i in range(5):
     gg.add_arc(i, i+1, weight=MyWeight(i))
 
-gg.set_start_state(0)
+gg.start_state = 0
 gg.set_final_weight(3, MyWeight(1))
 
 print("before final")
@@ -53,6 +57,11 @@ print(type(vv), dir(vv))
 print(str(vv))
 
 print("after")
+
+
+# try the isomorphics to itself
+gg.isomorphic(gg)
+
 
 vv = None
 gg = None

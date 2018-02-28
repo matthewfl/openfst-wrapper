@@ -12,6 +12,19 @@
 #include <fst/script/arc-class.h>
 #include <fst/script/register.h>
 
+
+// operations that we want to perform on the FSTs
+// #include <fst/script/isomorphic.h>
+// #include <fst/script/compose.h>
+// #include <fst/script/concat.h>
+//#include <fst/concat.h>
+
+#include <fst/isomorphic.h>
+#include <fst/concat.h>
+#include <fst/compose.h>
+#include <fst/determinize.h>
+#include <fst/project.h>
+
 #include <assert.h>
 
 
@@ -33,9 +46,29 @@ public:
   virtual const char* what() { return error; }
 };
 
+
+bool check_is_weight(py::object &weight) {
+  return
+    !weight.is_none() &&
+    hasattr(weight, "__add__") &&
+    hasattr(weight, "__mul__") &&
+    hasattr(weight, "__div__") &&
+    hasattr(weight, "__pow__") &&
+    hasattr(weight, "__hash__") &&
+    hasattr(weight, "__eq__") &&
+    hasattr(weight, "__str__") &&
+    hasattr(weight, "_member") &&
+    hasattr(weight, "_quantize") &&
+    hasattr(weight, "_reverse");
+  // zero & one ??
+}
+
 class FSTWeight {
-  FSTWeight(int32 g) : impl(), flags(g) {} // temp to debug the creation
+private:
+  FSTWeight(int32 g) : impl(), flags(g) {} // the static value constructor
 public:
+
+  using ReverseWeight = FSTWeight;
 
   enum {
     isZero = 0x1,
@@ -46,23 +79,16 @@ public:
 
   // the python object that we are wrapping
   int16_t flags;
-  //int16_t one_sum_count = 0;
-
-  //int32_t created = 0;
   py::object impl;
 
   FSTWeight() : impl() {
-    //py::handle h(nullptr);
-    //impl = py::object(h), false;
     flags = isNoWeight;
   }
 
   FSTWeight(py::object i) : impl(i) {
-    if(impl.is_none())
-      throw fsterror("Can not have a None edge weight");
-    //impl.inc_ref();
+    if(!check_is_weight(impl))
+      throw fsterror("Value does not implement Weight interface");
     flags = isSet;
-    //created = 0xdeadbeef;
   }
 
   static const FSTWeight& Zero() {
@@ -91,18 +117,21 @@ public:
   }
 
   // this might not be what the user wants to use for this???
-  static const uint64 Properties () { return kSemiring | kCommutative; }
+  static constexpr uint64 Properties () { return kSemiring | kCommutative; }
 
   bool Member() const {
     py::object r = impl.attr("_member")();
     return r.cast<bool>();
   }
 
-  // do nothing?
-  FSTWeight Reverse() { return *this; }
+  FSTWeight Reverse() const {
+    py::object r = impl.attr("_reverse")();
+    return FSTWeight(r);
+  }
 
   FSTWeight Quantize(float delta = kDelta) const {
-    return FSTWeight(impl.attr("_quantize")(delta));
+    py::object r = impl.attr("_quantize")(delta);
+    return FSTWeight(r);
   }
 
   std::istream &Read(std::istream &strm) const { throw fsterror("not implemented"); }
@@ -114,9 +143,6 @@ public:
   }
 
   FSTWeight& operator=(const FSTWeight& other) {
-    // py::handle h(other.impl);
-    // h.inc_ref();
-    // impl.dec_ref();
     impl = other.impl;
     flags = other.flags;
   }
@@ -163,6 +189,12 @@ inline FSTWeight Divide(const FSTWeight &w1, const FSTWeight &w2) {
   return FSTWeight(w1.impl.attr("__div__")(w2.impl));
 }
 
+inline FSTWeight Divide(const FSTWeight &w1, const FSTWeight &w2, const DivideType &type) {
+  // TODO: there are left and right divide types that could be passed to python???
+  // that might be important depending on which ring we are in
+  return Divide(w1, w2);
+}
+
 inline FSTWeight Power(const FSTWeight &w1, int n) {
   return FSTWeight(w1.impl.attr("__pow__")(n));
 }
@@ -182,9 +214,24 @@ inline bool operator!=(FSTWeight const &w1, FSTWeight const &w2) {
   return !(w1 == w2);
 }
 
+inline bool ApproxEqual(FSTWeight const &w1, FSTWeight const &w2, const float &delta) {
+  if(w1.isBuiltIn()) {
+    return w1.flags == w2.flags;  // if this is a built in value then it will have the same pointer
+  } else {
+    if(w2.isBuiltIn())
+      return false;
+    py::object r = w1.impl.attr("_approx_eq")(w2.impl, delta);
+    return r.cast<bool>();
+  }
+}
+
+inline bool ApproxEqual(FSTWeight const &w1, FSTWeight const &w2, const float &delta, const bool &error) {
+  return ApproxEqual(w1, w2, delta);
+}
+
 std::ostream &operator<<(std::ostream &os, const FSTWeight &w) {
-  //return os << py::str(w.impl.attr(u8"__str__")());
-  return os << "the python type\n";
+  py::object s = w.impl.attr("__str__")();
+  return os << s.cast<string>();
 }
 
 std::istream &operator>>(std::istream &is, const FSTWeight &w) {
@@ -200,9 +247,9 @@ struct register_pyweight {
   register_pyweight() {
     __mfl_hack_VectorFSTRegister(PyArc::Type(),
     new IORegistration<VectorFstClass>::Entry(
-                                          VectorFstClass::Read<PyArc>,
-                                          VectorFstClass::Create<PyArc>,
-                                          VectorFstClass::Convert<PyArc>
+                                              VectorFstClass::Read<PyArc>,
+                                              VectorFstClass::Create<PyArc>,
+                                              VectorFstClass::Convert<PyArc>
                                               ));
   }
 };
@@ -223,42 +270,18 @@ MutableFstClass* create_fst() {
 
 }
 
-bool check_is_weight(py::object &weight) {
-  return
-    hasattr(weight, "__add__") &&
-    hasattr(weight, "__mul__") &&
-    hasattr(weight, "__div__") &&
-    hasattr(weight, "__pow__") &&
-    hasattr(weight, "__hash__") &&
-    hasattr(weight, "__eq__") &&
-    hasattr(weight, "__str__") &&
-    hasattr(weight, "_member") &&
-    hasattr(weight, "_quantize");
-  // zero & one ??
-}
 
 bool add_arc(MutableFstClass &self, int64 from, int64 to,
              int64 input_label, int64 output_label, py::object weight) {
   // TODO: check if the weight is the correct python instance
 
-  if(weight.is_none()) {
-    throw fsterror("weight can not be None");
-  }
   if(!check_is_weight(weight)) {
     throw fsterror("weight is missing required method");
   }
-  // weight.inc_ref();
-  // weight.inc_ref();
-  // weight.inc_ref();
-  // weight.inc_ref();
-  // weight.inc_ref();
-  // weight.inc_ref();
-
 
   FSTWeight w1(weight);
   WeightClass w2(w1);
   ArcClass a(input_label, output_label, w2, to);
-  // FSTWeight w(weight);
   cout << "before add\n";
   bool ret = self.AddArc(from, a);
   cout << "after add\n";
@@ -266,19 +289,10 @@ bool add_arc(MutableFstClass &self, int64 from, int64 to,
 }
 
 void set_final(MutableFstClass &self, int64 state, py::object weight) {
-  if(weight.is_none()) {
-    throw fsterror("weight can not be None");
-  }
   if(!check_is_weight(weight)) {
     throw fsterror("weight is missing required method");
   }
-  // weight.inc_ref();
-  // weight.inc_ref();
-  // weight.inc_ref();
-  // weight.inc_ref();
-  // weight.inc_ref();
 
-  //cout << weight;
   FSTWeight w1(weight);
   WeightClass w2(w1);
   self.SetFinal(state, w2);
@@ -294,29 +308,19 @@ py::object final_weight(MutableFstClass &self, int64 state) {
       return py::cast(1);
     } else {
       // invalid
-      return py::cast("FST INVALID");
+      return py::cast("__FST_INVALID__");
     }
   }
 
   assert(finalW.flags == FSTWeight::isSet);
 
   py::object r =  finalW.impl; // this should still be holding onto the handle
-  //assert(finalW.created == 0xdeadbeef);
 
-  // r.inc_ref();
-  // r.inc_ref();
-  // r.inc_ref();
-  // r.inc_ref();
-  // r.inc_ref();
-  // r.inc_ref();
-  // r.inc_ref();
-  // r.inc_ref();
-
-
-  // py::handle s = r.attr("__str__");
-  // string ss = s().cast<string>();
-  // cout << ss;
   return r;
+}
+
+MutableFstClass* Copy(MutableFstClass &o) {
+  return new MutableFstClass(*o.GetMutableFst<PyArc>());
 }
 
 PYBIND11_MODULE(openfst_wrapper_backend, m) {
@@ -346,8 +350,65 @@ PYBIND11_MODULE(openfst_wrapper_backend, m) {
     d(Start)
 
     .def("_FinalWeight", &final_weight)
+#undef d
+
+    // compare two FST methods
+    .def("_Isomorphic", [](MutableFstClass &a, MutableFstClass &b, float delta) {
+        const Fst<PyArc> *i1 = a.GetFst<PyArc>();
+        const Fst<PyArc> *i2 = b.GetFst<PyArc>();
+        return Isomorphic(*i1, *i2, delta);
+      })
+
+
+    // methods that will generate a new FST or
+    .def("_Concat", [](MutableFstClass &a, MutableFstClass &b) {
+        const Fst<PyArc> *i1 = a.GetFst<PyArc>();
+        MutableFstClass *ret = Copy(b);
+        MutableFst<PyArc> *i2 = ret->GetMutableFst<PyArc>();
+        Concat(*i1, i2);
+        return ret;
+      })
+
+    .def("_Compose", [](MutableFstClass &a, MutableFstClass &b) {
+        MutableFstClass *ret = create_fst();
+        const Fst<PyArc> *i1 = a.GetFst<PyArc>();
+        const Fst<PyArc> *i2 = b.GetFst<PyArc>();
+        MutableFst<PyArc> *out = ret->GetMutableFst<PyArc>();
+        Compose(*i1, *i2, out);
+        return ret;
+      })
+    .def("_Determinize", [](MutableFstClass &a, float delta, py::object weight) {
+        FSTWeight weight_threshold(weight);
+
+        MutableFstClass *ret = create_fst();
+        const Fst<PyArc> *i1 = a.GetFst<PyArc>();
+        MutableFst<PyArc> *out = ret->GetMutableFst<PyArc>();
+
+
+        DeterminizeOptions<PyArc> ops(delta, weight_threshold);
+        Determinize(*i1, out, ops);
+        return ret;
+      })
+
+    .def("_Project", [](MutableFstClass &a, int type) {
+        MutableFstClass *ret = create_fst();
+        const Fst<PyArc> *i1 = a.GetFst<PyArc>();
+        MutableFst<PyArc> *out = ret->GetMutableFst<PyArc>();
+
+        ProjectType typ = type ? PROJECT_INPUT : PROJECT_OUTPUT;
+        Project(*i1, out, typ);
+        return ret;
+      })
+
+    // .def("_Difference", ...)
+
+    // .def("_Invert", ...)
+
+    // .def("_Prune", ....)
+
+    // .def("_RandomPath", ...)
+
 
     ;
-#undef d
 
 }
