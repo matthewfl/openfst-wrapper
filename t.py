@@ -15,15 +15,15 @@ class MyWeight(mfst.WeightBase):
 
     def __add__(self, other):
         print('hi from add')
-        return super().add(other)
+        return MyWeight(self._value + other._value)
 
     def __mul__(self, other):
         print('hi from mul')
-        return super().multiply(other)
+        return MyWeight(self._value * other._value)
 
     def __eq__(self, other):
         print('hi from equal')
-        return super().__eq__(other)
+        return self._value == other._value
 
     def _approx_eq(self, other, delta):
         print('hi from approx eq')
@@ -35,12 +35,12 @@ class MyWeight(mfst.WeightBase):
         num_weights -= 1
 
     def __str__(self):
-        print('calling string', type(self), dir(self))
-        return str(self._value)
+        print('calling string')#, type(self), dir(self))
+        return 'MyWeight({})'.format(self._value)
 
 gg = mfst.FST(MyWeight)
 
-for i in range(10):
+for i in range(9):
     gg.add_state()
 
 
@@ -56,14 +56,25 @@ vv = gg.get_final_weight(3)
 print(type(vv), dir(vv))
 print(str(vv))
 
+print(gg)
+
 print("after")
 
 
 # try the isomorphics to itself
-gg.isomorphic(gg)
+assert gg.isomorphic(gg)
 
+for a in gg.get_arcs(3):
+    print(a)
+a = None
 
 vv = None
 gg = None
 
-print(num_weights)
+assert num_weights == 0 # check that everything got deleted
+
+
+gg = mfst.FST()
+sf = gg.create_from_string('test')
+print(sf)
+assert sf.get_string() == 'test'

@@ -10,6 +10,7 @@
 
 
 #include <pybind11/pybind11.h>
+#include <pybind11/stl.h>
 
 #include <fst/fst.h>
 #include <fst/mutable-fst.h>
@@ -25,6 +26,9 @@
 #include <fst/difference.h>
 #include <fst/invert.h>
 #include <fst/prune.h>
+
+
+#include <fst/script/print.h>
 
 
 using namespace std;
@@ -129,7 +133,20 @@ public:
   }
 
   std::istream &Read(std::istream &strm) const { throw fsterror("not implemented"); }
-  std::ostream &Write(std::ostream &strm) const { throw fsterror("not implemented"); }
+  std::ostream &Write(std::ostream &os) const {
+    if(isBuiltIn()) {
+      if(flags == isOne) {
+        return os << "(1)" ;
+      } else if(flags == isZero) {
+        return os << "(0)";
+      } else {
+        return os << "(invalid)";
+      }
+    } else {
+      py::object s = impl.attr("__str__")();
+      return os << s.cast<string>();
+    }
+  }
 
   size_t Hash() const {
     py::object r = impl.attr("__hash__")();
@@ -142,7 +159,7 @@ public:
   }
 
   virtual ~FSTWeight() {
-    cout << "delete weight\n";
+    //cout << "delete weight\n";
   }
 
 };
@@ -224,8 +241,7 @@ inline bool ApproxEqual(FSTWeight const &w1, FSTWeight const &w2, const float &d
 }
 
 std::ostream &operator<<(std::ostream &os, const FSTWeight &w) {
-  py::object s = w.impl.attr("__str__")();
-  return os << s.cast<string>();
+  return w.Write(os);
 }
 
 std::istream &operator>>(std::istream &is, const FSTWeight &w) {
@@ -251,9 +267,9 @@ void add_arc(PyFST &self, int64 from, int64 to,
 
   FSTWeight w1(weight);
   PyArc a(input_label, output_label, w1, to);
-  cout << "before add\n";
+  //cout << "before add\n";
   self.AddArc(from, a);
-  cout << "after add\n";
+  //cout << "after add\n";
 }
 
 void set_final(PyFST &self, int64 state, py::object weight) {
@@ -408,10 +424,26 @@ PYBIND11_MODULE(openfst_wrapper_backend, m) {
         while(!iter.Done()) {
           auto &v = iter.Value();
           assert(v.weight.flags == FSTWeight::isSet);
+          // we are just returning the pure python object, so if it gets held
+          // that will still be ok
           ret.push_back(make_tuple(v.ilabel, v.olabel, v.nextstate, v.weight.impl));
+          iter.Next();
+        }
+
+        FSTWeight finalW = a.Final(state);
+        if(finalW.flags == FSTWeight::isSet) {
+          // then there is something here that we should push I guess?
+          ret.push_back(make_tuple(0, 0, -1, finalW.impl));
         }
 
         return ret;
+      })
+
+    .def("_toString", [](const PyFST &a) {
+        cout << "asdf\n";
+        ostringstream out;
+        fst::script::PrintFst(a, out);
+        return out.str();
       })
 
 

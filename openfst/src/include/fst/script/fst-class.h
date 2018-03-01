@@ -524,8 +524,6 @@ class VectorFstClass : public MutableFstClass {
   }
 };
 
-  // __mfl_hack_VectorFSTRegister
-
 }  // namespace script
 }  // namespace fst
 

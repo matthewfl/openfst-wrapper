@@ -1,7 +1,8 @@
 import openfst_wrapper_backend as _backend
 from collections import namedtuple as _namedtuple
 
-ArcType = _namedtuple(['ilabel', 'olabel', 'nextstate', 'weight'])
+ArcType = _namedtuple('Arc', ['ilabel', 'olabel', 'nextstate', 'weight'])
+
 
 class WeightBase(object):
 
@@ -94,7 +95,6 @@ class WeightBase(object):
         return self.__div__(other)
 
 
-
 class _WeightWrapper(WeightBase):
 
     def __init__(self, value=0):
@@ -103,39 +103,31 @@ class _WeightWrapper(WeightBase):
         self._value = value  # the value
 
     @classmethod
-    def _create(cls):
-        return cls()
+    def _create(cls, v):
+        return cls(v)
 
-    def zero(self):
-        return self._create()
+    @classmethod
+    def zero(cls):
+        return cls(0)
 
-    def one(self):
-        w = self._create()
-        w._value = 1
-        return w
+    @classmethod
+    def one(cls):
+        return cls(1)
 
     def __add__(self, other):
         assert type(other) is type(self)
-        w = self._create()
-        w._value = self._value + other._value
-        return w
+        return self._create(self._value + other._value)
 
     def __mul__(self, other):
         assert type(other) is type(self)
-        w = self._create()
-        w._value = self._value * other._value
-        return w
+        return self._create(self._value * other._value)
 
     def __div__(self, other):
         assert type(other) is type(self)
-        w = self._create()
-        w._value = self._value / other._value
-        return w
+        return self._create(self._value / other._value)
 
     def __pow__(self, n):
-        w = self._create()
-        w._value = w._value ** n
-        return w
+        return self._create(self._value ** n)
 
     def _member(self):
         # check that this is a member of the semiring
@@ -161,7 +153,6 @@ class _WeightWrapper(WeightBase):
 
     def __eq__(self, other):
         return isinstance(other, _WeightWrapper) and self._value == other._value
-
 
 
 class FST(_backend.FSTBase):
@@ -193,6 +184,38 @@ class FST(_backend.FSTBase):
             return None
         return self._weight_class(w)
 
+    def create_from_string(self, string):
+        ret = FST(weight_class=self._weight_class)
+        last = ret.add_state()
+        ret.start_state = last
+        for s in string:
+            state = ret.add_state()
+            ret.add_arc(last, state, output_label=ord(s))
+            last = state
+        if last:
+            ret.set_final_weight(last)
+        return ret
+
+    def get_string(self):
+        """
+        Returns the string representation in the case that there is only a single path in the fst
+        """
+        state = self.start_state
+        seen = set()
+        ret = []
+        while state != -1:
+            edges = list(self.get_arcs(state))
+            if len(edges) != 1:
+                raise RuntimeError("FST does not contain exactly one path")
+            l = edges[0].olabel
+            if l != 0:  # the epsilon state
+                ret.append(chr(l))
+            if edges[0].nextstate in seen:
+                raise RuntimeError("FST contains cycle")
+            seen.add(state)
+            state = edges[0].nextstate
+        return ''.join(ret)
+
     @property
     def num_states(self):
         """
@@ -200,8 +223,7 @@ class FST(_backend.FSTBase):
         """
         return self._NumStates()
 
-    @property
-    def num_arcs(self):
+    def num_arcs(self, state):
         """
         Return the number of arcs in the fst
         """
@@ -257,7 +279,7 @@ class FST(_backend.FSTBase):
         """
         return self._DeleteStates()
 
-    def set_final_weight(self, state, weight):
+    def set_final_weight(self, state, weight=1):
         """
         Set the weight that this state transisions to the final state
         """
@@ -390,3 +412,13 @@ class FST(_backend.FSTBase):
         http://www.openfst.org/twiki/bin/view/FST/RandGenDoc
         """
         pass
+
+    def __str__(self):
+        if self.num_states < 10:
+            # if the FST is small enough that we might want to print the whole thing in the string
+            return 'FST {\n' + self._toString() + '\n}'
+        else:
+            return 'FST(num_states={})'.format(self.num_states)
+
+    def __repl__(self):
+        return str(self)
