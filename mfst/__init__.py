@@ -1,5 +1,7 @@
 import openfst_wrapper_backend as _backend
+from collections import namedtuple as _namedtuple
 
+ArcType = _namedtuple(['ilabel', 'olabel', 'nextstate', 'weight'])
 
 class WeightBase(object):
 
@@ -231,10 +233,10 @@ class FST(_backend.FSTBase):
         return self._AddState()
 
     def add_arc(self, from_state, to_state,
-                weight=1, input_label=-1, output_label=-1):
+                weight=1, input_label=0, output_label=0):
         """
         Add an arc between states from->to with weight (default 1).
-        input_label and output label should be ints that map to a label (-1 == epsilon)
+        input_label and output label should be ints that map to a label (0 == epsilon)
         """
         # assert if the state is valid otherwise openfst calls exit(1)
         assert (from_state >= 0 and from_state < self.num_states and
@@ -273,7 +275,9 @@ class FST(_backend.FSTBase):
         """
         Return the arcs coming out of some state
         """
-        raise NotImplementedError()  # TODO
+        assert (state >= 0 and state < self.num_states), "Invalid state id"
+        for arc in self._ArcList(state):
+            yield ArcType(*arc)
 
     def isomorphic(self, other, delta=1.0/1024):
         """
@@ -357,7 +361,7 @@ class FST(_backend.FSTBase):
         http://www.openfst.org/twiki/bin/view/FST/DifferenceDoc
         """
         assert isinstance(other, FST)
-        assert False  # TODO
+        assert self._Difference(other)
 
     def invert(self):
         """
@@ -366,7 +370,7 @@ class FST(_backend.FSTBase):
 
         http://www.openfst.org/twiki/bin/view/FST/InvertDoc
         """
-        assert False  # TODO
+        return self._Invert()
 
     def prune(self, weight):
         """
@@ -377,7 +381,7 @@ class FST(_backend.FSTBase):
 
         http://www.openfst.org/twiki/bin/view/FST/PruneDoc
         """
-        assert False
+        return self._Prune(self._make_weight(weight))
 
     def random_path(self, arc_selector=None):
         """
@@ -385,6 +389,4 @@ class FST(_backend.FSTBase):
 
         http://www.openfst.org/twiki/bin/view/FST/RandGenDoc
         """
-        if not arc_selector:
-            # convert the weight to a scalar that we can use to sample different paths
-            arc_selector = lambda weight: 1  # uniform
+        pass

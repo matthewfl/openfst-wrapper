@@ -23,7 +23,7 @@ class MyWeight(mfst.WeightBase):
 
     def __eq__(self, other):
         print('hi from equal')
-        return super(self).equal(other)
+        return super().__eq__(other)
 
     def _approx_eq(self, other, delta):
         print('hi from approx eq')

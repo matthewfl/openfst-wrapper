@@ -1,43 +1,37 @@
 #include <memory>
 #include <string>
 #include <sstream>
+#include <random>
+#include <vector>
+#include <tuple>
 
 #undef NDEBUG
+#include <assert.h>
+
+
 #include <pybind11/pybind11.h>
 
 #include <fst/fst.h>
 #include <fst/mutable-fst.h>
+#include <fst/vector-fst.h>
 #include <fst/arc.h>
-#include <fst/script/fst-class.h>
-#include <fst/script/arc-class.h>
-#include <fst/script/register.h>
 
-
-// operations that we want to perform on the FSTs
-// #include <fst/script/isomorphic.h>
-// #include <fst/script/compose.h>
-// #include <fst/script/concat.h>
-//#include <fst/concat.h>
-
+// fst operations that we are supporting
 #include <fst/isomorphic.h>
 #include <fst/concat.h>
 #include <fst/compose.h>
 #include <fst/determinize.h>
 #include <fst/project.h>
-
-#include <assert.h>
+#include <fst/difference.h>
+#include <fst/invert.h>
+#include <fst/prune.h>
 
 
 using namespace std;
 using namespace fst;
-using namespace fst::script;
 namespace py = pybind11;
 
-namespace fst { namespace script {
-    void __mfl_hack_VectorFSTRegister(string name, IORegistration<VectorFstClass>::Entry* entry);
-  } }
-
-
+// this error should just become a runtime error in python land
 class fsterror : public exception {
 private:
   const char* error;
@@ -240,38 +234,14 @@ std::istream &operator>>(std::istream &is, const FSTWeight &w) {
 
 
 using PyArc = ArcTpl<FSTWeight>;
+using PyFST = VectorFst<PyArc, VectorState<PyArc> >;
 
-static FstRegister < PyArc > our_weights;
-
-struct register_pyweight {
-  register_pyweight() {
-    __mfl_hack_VectorFSTRegister(PyArc::Type(),
-    new IORegistration<VectorFstClass>::Entry(
-                                              VectorFstClass::Read<PyArc>,
-                                              VectorFstClass::Create<PyArc>,
-                                              VectorFstClass::Convert<PyArc>
-                                              ));
-  }
-};
-static register_pyweight _register_pyweight;
-
-MutableFstClass* create_fst() {
-
-  // register the arc type class as can't get this to work normally
-  // we might be getting loaded before the other shared object, which I guess is causing us to be unable
-  // to properly register or something????
-
-  // REGISTER_FST_WEIGHT(FSTWeight);
-  // REGISTER_FST_CLASSES(PyArc);
-
-
-  MutableFstClass* r = new VectorFstClass(PyArc::Type());
-  return r;
-
+PyFST* create_fst() {
+  return new PyFST();
 }
 
 
-bool add_arc(MutableFstClass &self, int64 from, int64 to,
+void add_arc(PyFST &self, int64 from, int64 to,
              int64 input_label, int64 output_label, py::object weight) {
   // TODO: check if the weight is the correct python instance
 
@@ -280,27 +250,23 @@ bool add_arc(MutableFstClass &self, int64 from, int64 to,
   }
 
   FSTWeight w1(weight);
-  WeightClass w2(w1);
-  ArcClass a(input_label, output_label, w2, to);
+  PyArc a(input_label, output_label, w1, to);
   cout << "before add\n";
-  bool ret = self.AddArc(from, a);
+  self.AddArc(from, a);
   cout << "after add\n";
-  return ret;
 }
 
-void set_final(MutableFstClass &self, int64 state, py::object weight) {
+void set_final(PyFST &self, int64 state, py::object weight) {
   if(!check_is_weight(weight)) {
     throw fsterror("weight is missing required method");
   }
 
   FSTWeight w1(weight);
-  WeightClass w2(w1);
-  self.SetFinal(state, w2);
+  self.SetFinal(state, w1);
 }
 
-py::object final_weight(MutableFstClass &self, int64 state) {
-  //MutableFstClass self = pself.cast<MutableFstClass*>();
-  FSTWeight finalW = self.GetMutableFst<PyArc>()->Final(state);
+py::object final_weight(PyFST &self, int64 state) {
+  FSTWeight finalW = self.Final(state);
   if(finalW.isBuiltIn()) {
     if(finalW.flags == FSTWeight::isZero) {
       return py::cast(0);
@@ -318,31 +284,48 @@ py::object final_weight(MutableFstClass &self, int64 state) {
 
   return r;
 }
+/*
 
-MutableFstClass* Copy(MutableFstClass &o) {
-  return new MutableFstClass(*o.GetMutableFst<PyArc>());
-}
+class PythonArcSelector {
+public:
+  using StateId = typename PyFST::StateId;
+  using Weight = typename PyFST::Weight;
+
+  PythonArcSelector() {}
+
+  explicit PythonArcSelector(uint64 seed) : rand_(seed) {}
+
+  size_t operator()(const Fst<PyFST> &fst, StateId s) const {
+    const auto n = fst.NumArcs(s) + (fst.Final(s) != Weight::Zero());
+    //vector<float> scores;  // the unweighted scores for the arcs
+
+    // TODO:
+    return static_cast<size_t>(
+        std::uniform_int_distribution<>(0, n - 1)(rand_));
+  }
+
+ private:
+  mutable std::mt19937_64 rand_;
+
+};
+*/
 
 PYBIND11_MODULE(openfst_wrapper_backend, m) {
   m.doc() = "Backing wrapper for OpenFST";
 
-  py::class_<MutableFstClass>(m, "FSTBase")
+  py::class_<PyFST>(m, "FSTBase")
     .def(py::init<>(&create_fst))
-#define d(name) .def("_" #name, &MutableFstClass:: name)
+#define d(name) .def("_" #name, &PyFST:: name)
     .def("_AddArc", &add_arc) // keep the weight alive when added
-    //d(AddArc)
     d(AddState)
     // there are more than one method with this name but different type signatures
-    .def("_DeleteArcs", [](MutableFstClass* m, int64 v) { if(m) m->DeleteArcs(v); })
-    .def("_DeleteStates", [](MutableFstClass *m) { if(m) m->DeleteStates(); })
+    .def("_DeleteArcs", [](PyFST *m, int64 v) { if(m) m->DeleteArcs(v); })
+    .def("_DeleteStates", [](PyFST *m) { if(m) m->DeleteStates(); })
 
     d(NumStates)
     d(ReserveArcs)
     d(ReserveStates)
-    ///d(SetInputSymbols)
-    //d(SetOutputSymbols)
 
-    //d(SetFinal)
     .def("_SetFinal", &set_final)
     d(SetStart)
 
@@ -352,61 +335,84 @@ PYBIND11_MODULE(openfst_wrapper_backend, m) {
     .def("_FinalWeight", &final_weight)
 #undef d
 
-    // compare two FST methods
-    .def("_Isomorphic", [](MutableFstClass &a, MutableFstClass &b, float delta) {
-        const Fst<PyArc> *i1 = a.GetFst<PyArc>();
-        const Fst<PyArc> *i2 = b.GetFst<PyArc>();
-        return Isomorphic(*i1, *i2, delta);
-      })
 
+    // compare two FST methods
+    .def("_Isomorphic", [](PyFST &a, PyFST  &b, float delta) {
+        return Isomorphic(a, b, delta);
+      })
 
     // methods that will generate a new FST or
-    .def("_Concat", [](MutableFstClass &a, MutableFstClass &b) {
-        const Fst<PyArc> *i1 = a.GetFst<PyArc>();
-        MutableFstClass *ret = Copy(b);
-        MutableFst<PyArc> *i2 = ret->GetMutableFst<PyArc>();
-        Concat(*i1, i2);
+    .def("_Concat", [](const PyFST &a, PyFST &b) {
+        PyFST *ret = b.Copy();
+        Concat(a, ret);
         return ret;
       })
 
-    .def("_Compose", [](MutableFstClass &a, MutableFstClass &b) {
-        MutableFstClass *ret = create_fst();
-        const Fst<PyArc> *i1 = a.GetFst<PyArc>();
-        const Fst<PyArc> *i2 = b.GetFst<PyArc>();
-        MutableFst<PyArc> *out = ret->GetMutableFst<PyArc>();
-        Compose(*i1, *i2, out);
+
+    .def("_Compose", [](const PyFST &a, const PyFST &b) {
+        PyFST *ret = create_fst();
+        Compose(a,b, ret);
         return ret;
       })
-    .def("_Determinize", [](MutableFstClass &a, float delta, py::object weight) {
+
+    .def("_Determinize", [](const PyFST &a, float delta, py::object weight) {
         FSTWeight weight_threshold(weight);
 
-        MutableFstClass *ret = create_fst();
-        const Fst<PyArc> *i1 = a.GetFst<PyArc>();
-        MutableFst<PyArc> *out = ret->GetMutableFst<PyArc>();
-
+        PyFST *ret = create_fst();
 
         DeterminizeOptions<PyArc> ops(delta, weight_threshold);
-        Determinize(*i1, out, ops);
+        Determinize(a, ret, ops);
         return ret;
       })
 
-    .def("_Project", [](MutableFstClass &a, int type) {
-        MutableFstClass *ret = create_fst();
-        const Fst<PyArc> *i1 = a.GetFst<PyArc>();
-        MutableFst<PyArc> *out = ret->GetMutableFst<PyArc>();
+    .def("_Project", [](const PyFST &a, int type) {
+        PyFST *ret = create_fst();
 
         ProjectType typ = type ? PROJECT_INPUT : PROJECT_OUTPUT;
-        Project(*i1, out, typ);
+        Project(a, ret, typ);
         return ret;
       })
 
-    // .def("_Difference", ...)
+    .def("_Difference", [](const PyFST &a, const PyFST &b) {
+        PyFST *ret = create_fst();
+        Difference(a, b, ret);
+        return ret;
+      })
 
-    // .def("_Invert", ...)
+    .def("_Invert", [](const PyFST &a) {
+        PyFST *ret = a.Copy();
+        Invert(ret);
+        return ret;
+      })
 
-    // .def("_Prune", ....)
+    .def("_Prune", [](const PyFST &a, py::object weight) {
+        FSTWeight weight_threshold(weight);
+        PyFST *ret = create_fst();
+        Prune(a, ret, weight_threshold);
+        return ret;
+      })
 
-    // .def("_RandomPath", ...)
+    .def("_RandomPath", [](const PyFST &a) {
+        // TODO: have something that is going to call back into the
+        // python process and use that to generate the weights that are along the path
+
+        assert(false); // TODO:
+        return false;
+      })
+
+    .def("_ArcList", [](const PyFST &a, int64 state) {
+        // input label, output label, to state, weight
+        vector<py::tuple> ret;
+
+        ArcIterator<PyFST> iter(a, state);
+        while(!iter.Done()) {
+          auto &v = iter.Value();
+          assert(v.weight.flags == FSTWeight::isSet);
+          ret.push_back(make_tuple(v.ilabel, v.olabel, v.nextstate, v.weight.impl));
+        }
+
+        return ret;
+      })
 
 
     ;
