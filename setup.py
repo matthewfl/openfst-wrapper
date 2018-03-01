@@ -21,7 +21,7 @@ if not os.path.exists(os.path.join(sys.prefix, 'include', 'fst', 'version-'+open
     # then there are no open fst headers where we expect them
     # -__-
     # CXX='g++ -g' CC='gcc -g'  (for debugging)
-    cmd = "cd {dir} && make clean && ./configure prefix={prefix} --enable-grm --enable-bin --enable-ngram-fsts --enable-const-fsts --enable-linear-fsts && make -j {threads} && make install".format(
+    cmd = "cd {dir} && ./configure prefix={prefix} --enable-grm --enable-bin --enable-ngram-fsts --enable-const-fsts --enable-linear-fsts && make -j {threads} && make install && make clean".format(
         dir=os.path.join(os.path.dirname(os.path.abspath(__file__)), 'openfst'),
         prefix=sys.prefix,
         threads=max(os.cpu_count() - 2, 1)

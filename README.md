@@ -1,4 +1,4 @@
-# OpenFST wrapper that supports custom semirings
+# OpenFST wrapper that supports custom semirings and iPython notebooks
 
 Documentation in `mfst/__init__.py`
 Example in `t.py`
