@@ -81,3 +81,26 @@ assert sf.get_string() == 'test'
 
 assert sf._repr_html_() is not None
 print(sf._repr_html_())
+
+
+def build_hc_fst(fst, n=3):
+    start = fst.add_state()
+    fst.start_state = start
+    h = [fst.add_state() for i in range(n)]
+    c = [fst.add_state() for i in range(n)]
+    fst.add_arc(start, h[0], input_label='H')
+    fst.add_arc(start, c[0], input_label='C')
+    for i in range(n - 1):
+        fst.add_arc(h[i], h[i+1], input_label='H')
+        fst.add_arc(c[i], c[i+1], input_label='C')
+        fst.add_arc(h[i], c[i+1], input_label='C')
+        fst.add_arc(c[i], h[i+1], input_label='H')
+    final = fst.add_state()
+    fst.set_final_weight(final, 1)
+    fst.add_arc(c[-1], final)
+    fst.add_arc(h[-1], final)
+
+
+hc = mfst.FST()
+build_hc_fst(hc)
+hc.determinize()

@@ -61,6 +61,7 @@ bool check_is_weight(py::object &weight) {
   // zero & one ??
 }
 
+
 class FSTWeight {
 private:
   FSTWeight(int32 g) : impl(), flags(g) {} // the static value constructor
@@ -115,21 +116,34 @@ public:
   }
 
   // this might not be what the user wants to use for this???
-  static constexpr uint64 Properties () { return kSemiring | kCommutative; }
+  // this has to be a constexpr which means that we can't change it from python
+  static constexpr uint64 Properties () { return kSemiring | kCommutative | kPath; }
 
   bool Member() const {
-    py::object r = impl.attr("_member")();
-    return r.cast<bool>();
+    if(isBuiltIn()) {
+      return (flags & (isOne | isZero)) != 0;
+    } else {
+      py::object r = impl.attr("_member")();
+      return r.cast<bool>();
+    }
   }
 
   FSTWeight Reverse() const {
-    py::object r = impl.attr("_reverse")();
-    return FSTWeight(r);
+    if(isBuiltIn()) {
+      return *this;
+    } else {
+      py::object r = impl.attr("_reverse")();
+      return FSTWeight(r);
+    }
   }
 
   FSTWeight Quantize(float delta = kDelta) const {
-    py::object r = impl.attr("_quantize")(delta);
-    return FSTWeight(r);
+    if(isBuiltIn()) {
+      return *this;
+    } else {
+      py::object r = impl.attr("_quantize")(delta);
+      return FSTWeight(r);
+    }
   }
 
   std::istream &Read(std::istream &strm) const { throw fsterror("not implemented"); }
@@ -149,8 +163,12 @@ public:
   }
 
   size_t Hash() const {
-    py::object r = impl.attr("__hash__")();
-    return r.cast<size_t>();
+    if(isBuiltIn()) {
+      return flags;
+    } else {
+      py::object r = impl.attr("__hash__")();
+      return r.cast<size_t>();
+    }
   }
 
   FSTWeight& operator=(const FSTWeight& other) {
@@ -207,7 +225,11 @@ inline FSTWeight Divide(const FSTWeight &w1, const FSTWeight &w2, const DivideTy
 }
 
 inline FSTWeight Power(const FSTWeight &w1, int n) {
-  return FSTWeight(w1.impl.attr("__pow__")(n));
+  if(w1.isBuiltIn()) {
+    return w1;
+  } else {
+    return FSTWeight(w1.impl.attr("__pow__")(n));
+  }
 }
 
 inline bool operator==(FSTWeight const &w1, FSTWeight const &w2) {

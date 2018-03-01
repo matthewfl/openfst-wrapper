@@ -3,7 +3,6 @@ from collections import namedtuple as _namedtuple
 
 ArcType = _namedtuple('Arc', ['ilabel', 'olabel', 'nextstate', 'weight'])
 
-_loaded_html_library = False
 
 class WeightBase(object):
 
@@ -96,7 +95,7 @@ class WeightBase(object):
         return self.__div__(other)
 
 
-class _WeightWrapper(WeightBase):
+class ValueWeight(WeightBase):
 
     def __init__(self, value=0):
         # This needs to happen otherwise the backing classes might not get set up properly
@@ -153,7 +152,7 @@ class _WeightWrapper(WeightBase):
         return hash(self._value)
 
     def __eq__(self, other):
-        return isinstance(other, _WeightWrapper) and self._value == other._value
+        return isinstance(other, ValueWeight) and self._value == other._value
 
 
 class FST(_backend.FSTBase):
@@ -164,7 +163,7 @@ class FST(_backend.FSTBase):
     def __init__(self, weight_class=None):
         super().__init__()
         if not weight_class:
-            self._weight_class = _WeightWrapper
+            self._weight_class = ValueWeight
         else:
             assert issubclass(weight_class, WeightBase)
             weight_class(0)  # check that we can construct zero and one
@@ -264,6 +263,12 @@ class FST(_backend.FSTBase):
         # assert if the state is valid otherwise openfst calls exit(1)
         assert (from_state >= 0 and from_state < self.num_states and
                 to_state >= 0 and to_state < self.num_states), "Invalid state id"
+        if isinstance(input_label, str):
+            assert len(input_label) == 1, "FST string labels can only be a single character"
+            input_label = ord(input_label)
+        if isinstance(output_label, str):
+            assert len(input_label) == 1, "FST string labels can only be a single character"
+            output_label = ord(output_label)
         return self._AddArc(from_state, to_state, input_label, output_label,
                             self._make_weight(weight))
 
@@ -429,68 +434,53 @@ class FST(_backend.FSTBase):
         When returned from an ipython cell, this will generate the FST visualization
         """
         # mostly copied from dagre-d3 tutorial / demos
-        global _loaded_html_library
         from uuid import uuid4
-        import os
         import json
         ret = ''
         if self.num_states == 0:
             return '<code>Empty FST</code>'
-        if True or not _loaded_html_library:
-        #     # global as only do this once per ipython notebook
-        #     with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'd3.v4.min.js'), 'r') as f:
-        #               ret += '<script>\n'
-        #               ret += f.read()
-        #               ret += '\n</script>'
+        # sigh...loading these as external files
+        # ipython is loading with require js
+        ret += '''
+        <script>
+        require.config({
+        paths: {
+        "d3": "https://cdnjs.cloudflare.com/ajax/libs/d3/4.13.0/d3",
+        "dagreD3": "https://cdnjs.cloudflare.com/ajax/libs/dagre-d3/0.6.1/dagre-d3.min"
+        }
+        });
+        </script>
+        <!--script>
+        (function() {
+        if(typeof d3 == "undefined") {
+        var script   = document.createElement("script");
+        script.type  = "text/javascript";
+        script.src   = "https://cdnjs.cloudflare.com/ajax/libs/d3/4.13.0/d3.js";
+        document.body.appendChild(script);
 
-        #     with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'dagre-d3.min.js'), 'r') as f:
-        #               ret += '<script>\n'
-        #               ret += f.read()
-        #               ret += '\n</script>'
+        var script   = document.createElement("script");
+        script.type  = "text/javascript";
+        script.src   = "https://cdnjs.cloudflare.com/ajax/libs/dagre-d3/0.6.1/dagre-d3.min.js";
+        document.body.appendChild(script);
+        }
+        })();
+        </script-->
+        <style>
+        .node rect,
+        .node circle,
+        .node ellipse {
+        stroke: #333;
+        fill: #fff;
+        stroke-width: 1px;
+        }
 
-            # sigh...loading these as external files
-            # ipython is loading with require js
-            ret += '''
-            <script>
-            require.config({
-            paths: {
-            "d3": "https://cdnjs.cloudflare.com/ajax/libs/d3/4.13.0/d3",
-            "dagreD3": "https://cdnjs.cloudflare.com/ajax/libs/dagre-d3/0.6.1/dagre-d3.min"
-            }
-            });
-            </script>
-            <!--script>
-            (function() {
-            if(typeof d3 == "undefined") {
-            var script   = document.createElement("script");
-            script.type  = "text/javascript";
-            script.src   = "https://cdnjs.cloudflare.com/ajax/libs/d3/4.13.0/d3.js";
-            document.body.appendChild(script);
-
-            var script   = document.createElement("script");
-            script.type  = "text/javascript";
-            script.src   = "https://cdnjs.cloudflare.com/ajax/libs/dagre-d3/0.6.1/dagre-d3.min.js";
-            document.body.appendChild(script);
-            }
-            })();
-            </script-->
-            <style>
-            .node rect,
-            .node circle,
-            .node ellipse {
-            stroke: #333;
-            fill: #fff;
-            stroke-width: 1px;
-            }
-
-            .edgePath path {
-            stroke: #333;
-            fill: #333;
-            stroke-width: 1.5px;
-            }
-            </style>
-            '''
-            _loaded_html_library = True
+        .edgePath path {
+        stroke: #333;
+        fill: #333;
+        stroke-width: 1.5px;
+        }
+        </style>
+        '''
 
 
         obj = 'fst_' + uuid4().hex
@@ -513,7 +503,7 @@ class FST(_backend.FSTBase):
         # in the output source code
 
         for sid in range(self.num_states):
-            ret += f'g.setNode("state_{sid}", {{ label: "{sid}" }});\n'
+            ret += f'g.setNode("state_{sid}", {{ label: "{sid}" , shape: "circle" }});\n'
         for sid in range(self.num_states):
             for arc in self.get_arcs(sid):
                 if arc.nextstate == -1:
