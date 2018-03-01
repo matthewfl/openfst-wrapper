@@ -160,15 +160,20 @@ class FST(object):
     Wraps a mutable FST class
     """
 
-    def __init__(self, fst_type='base', weight_class=None, _fst=None):
+    def __init__(self, fst_type='base', weight_class=None, _fst=None, acceptor=False):
         if _fst:
             self._fst = _fst
         else:
+            if fst_type == 'acceptor':
+                acceptor = True
+                fst_type = 'base'
             self._fst = {
                 # these classes are defined in c++ to wrap openfst
                 'base': _backend.FSTBase,
-                'path': _backend.FSTPath
+                'path': _backend.FSTPath,
             }[fst_type]()
+
+        self._acceptor = acceptor
 
         if not weight_class:
             self._weight_class = ValueWeight
@@ -193,15 +198,19 @@ class FST(object):
         return self._weight_class(w)
 
     def _wrap_fst(self, fst):
-        return type(self)(weight_class=self._weight_class, _fst=fst)
+        return type(self)(weight_class=self._weight_class, _fst=fst, acceptor=self._acceptor)
 
     def create_from_string(self, string):
-        ret = FST(weight_class=self._weight_class, _fst=type(self._fst)())
+        ret = FST(weight_class=self._weight_class, _fst=type(self._fst)(), acceptor=self._acceptor)
         last = ret.add_state()
         ret.start_state = last
         for s in string:
             state = ret.add_state()
-            ret.add_arc(last, state, output_label=ord(s))
+            if self._acceptor:
+                # acceptors are machines with the same input and output label
+                ret.add_arc(last, state, output_label=ord(s), input_label=ord(s))
+            else:
+                ret.add_arc(last, state, output_label=ord(s))
             last = state
         if last:
             ret.set_final_weight(last)
@@ -278,8 +287,11 @@ class FST(object):
             assert len(input_label) == 1, "FST string labels can only be a single character"
             input_label = ord(input_label)
         if isinstance(output_label, str):
-            assert len(input_label) == 1, "FST string labels can only be a single character"
+            assert len(output_label) == 1, "FST string labels can only be a single character"
             output_label = ord(output_label)
+        if self._acceptor:
+            # acceptors are machines with the same input and output label
+            output_label = input_label
         return self._fst._AddArc(from_state, to_state, input_label, output_label,
                                  self._make_weight(weight))
 
@@ -423,12 +435,41 @@ class FST(object):
         return self._wrap_fst(self._fst._Prune(self._make_weight(weight)))
 
     def union(self, other):
+        """
+        This operation computes the union (sum) of two FSTs. If A transduces string
+        x to y with weight a and B transduces string w to v with weight b, then their
+        union transduces x to y with weight a and w to v with weight b.
 
-        pass
+        http://www.openfst.org/twiki/bin/view/FST/UnionDoc
+        """
+        return self._wrap_fst(self._fst._Union(other._fst))
+
 
     def intersect(self, other):
-        pass
+        """
+        This operation computes the intersection (Hadamard product) of two
+        FSAs. Only strings that are in both automata are retained in the
+        result.
 
+        http://www.openfst.org/twiki/bin/view/FST/IntersectDoc
+        """
+        return self._wrap_fst(self._fst._Intersect(other._fst))
+
+    def push(self, towards='final'):
+        """
+        This operation produces an equivalent transducer by pushing the weights
+        and/or the labels towards the initial state or toward the final states.
+
+        http://www.openfst.org/twiki/bin/view/FST/PushDoc
+
+        """
+        if towards == 'final':
+            t = 1
+        elif towards == 'initial':
+            t = 0
+        else:
+            raise RuntimeError("Unknown direction for weight pushing")
+        return self._wrap_fst(self._fst._Push(t))
 
     def random_path(self, arc_selector=None):
         """
@@ -441,12 +482,18 @@ class FST(object):
     def __str__(self):
         if self.num_states < 10:
             # if the FST is small enough that we might want to print the whole thing in the string
-            return 'FST {\n' + self._fst._toString() + '\n}'
+            return self.full_str()
         else:
             return 'FST(num_states={})'.format(self.num_states)
 
+    def full_str(self):
+        return 'FST {\n' + self._fst._toString() + '\n}'
+
     def __repr__(self):
         return str(self)
+
+    def __bool__(self):
+        return self.num_states > 0
 
     def _repr_html_(self):
         """
@@ -522,7 +569,18 @@ class FST(object):
         # in the output source code
 
         for sid in range(self.num_states):
-            ret += f'g.setNode("state_{sid}", {{ label: "{sid}" , shape: "circle" }});\n'
+            finalW = ''
+            ww = self._fst._FinalWeight(sid)
+            if not isinstance(ww, int) or ww != 0:
+                ww = self._make_weight(ww)
+                finalW = f'\n({ww})'
+            label = f'{sid}{finalW}'
+
+            ret += f'g.setNode("state_{sid}", {{ label: {json.dumps(label)} , shape: "circle" }});\n'
+            if finalW:
+                # make the final states red
+                ret += f'g.node("state_{sid}").style = "fill: #f77"; \n'
+
         for sid in range(self.num_states):
             for arc in self.get_arcs(sid):
                 if arc.nextstate == -1:
@@ -551,7 +609,6 @@ class FST(object):
 
         # make the start state green
         ret += f'g.node("state_{self.start_state}").style = "fill: #7f7"; \n'
-
 
         ret += f'var svg = d3.select("#{obj}"); \n'
         ret += '''

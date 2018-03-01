@@ -104,3 +104,19 @@ def build_hc_fst(fst, n=3):
 hc = mfst.FST('path')
 build_hc_fst(hc)
 print(hc.determinize())
+
+
+fst = mfst.FST()
+f1 = fst.create_from_string('hello')
+f2 = fst.create_from_string('world')
+
+g = f1.union(f2)
+print(g.full_str())
+g._repr_html_()
+
+fst = mfst.FST('acceptor')
+f1 = fst.create_from_string('hello')
+f2 = fst.create_from_string('world')
+g = f1.intersect(f2)
+print(g.full_str())
+g._repr_html_()

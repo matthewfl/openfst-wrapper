@@ -26,6 +26,9 @@
 #include <fst/difference.h>
 #include <fst/invert.h>
 #include <fst/prune.h>
+#include <fst/intersect.h>
+#include <fst/union.h>
+#include <fst/push.h>
 
 
 #include <fst/script/print.h>
@@ -178,6 +181,35 @@ public:
     flags = other.flags;
   }
 
+  py::object PythonObject() const {
+    if(flags == isSet) {
+      return impl;
+    } else if(flags == isOne) {
+      return py::cast(1);
+    } else if(flags == isZero) {
+      return py::cast(0);
+    } else {
+      return py::cast("__FST_INVALID__");
+    }
+  }
+
+  py::object buildObject(py::object &other) const {
+    // in the case that we are just wrapping a count, we still want to construct some object
+    // that can be used to track the semiring operations
+    py::object ret = other.attr("zero")(); // get the zero element
+    py::object v = other.attr("one")();
+    uint64 i = 0;
+    while(i) {
+      if(i & 0x1) {
+        ret = ret.attr("__add__")(v);
+      }
+      i >>= 1;
+      if(!i) break;
+      v = v.attr("__add__")(v);
+    }
+    return ret;
+  }
+
   virtual ~FSTWeight<S>() {
     //cout << "delete weight\n";
   }
@@ -322,20 +354,21 @@ void set_final(PyFST<S> &self, int64 state, py::object weight) {
 template<uint64 S>
 py::object final_weight(PyFST<S> &self, int64 state) {
   FSTWeight<S> finalW = self.Final(state);
-  if(finalW.isBuiltIn()) {
-    if(finalW.flags == FSTWeight<S>::isZero) {
-      return py::cast(0);
-    } else if(finalW.flags == FSTWeight<S>::isOne) {
-      return py::cast(1);
-    } else {
-      // invalid
-      return py::cast("__FST_INVALID__");
-    }
-  }
+  py::object r = finalW.PythonObject();
+  // if(finalW.isBuiltIn()) {
+  //   if(finalW.flags == FSTWeight<S>::isZero) {
+  //     return py::cast(0);
+  //   } else if(finalW.flags == FSTWeight<S>::isOne) {
+  //     return py::cast(1);
+  //   } else {
+  //     // invalid
+  //     return py::cast("");
+  //   }
+  // }
 
-  assert(finalW.flags == FSTWeight<S>::isSet);
+  // assert(finalW.flags == FSTWeight<S>::isSet);
 
-  py::object r =  finalW.impl; // this should still be holding onto the handle
+  // py::object r =  finalW.impl; // this should still be holding onto the handle
 
   return r;
 }
@@ -450,6 +483,28 @@ void define_class(pybind11::module &m, const char *name) {
         return ret;
       })
 
+    .def("_Intersect", [](const PyFST<S> &a, const PyFST<S> &b) {
+        PyFST<S> *ret = new PyFST<S>();
+        Intersect(a, b, ret);
+        return ret;
+      })
+
+    .def("_Union", [](const PyFST<S> &a, const PyFST<S> &b) {
+        PyFST<S> *ret = a.Copy();
+        Union(ret, b);
+        return ret;
+      })
+
+    .def("_Push", [](const PyFST<S> &a, int mode) {
+        PyFST<S> *ret = new PyFST<S>();
+        if(mode == 0) {
+          Push<PyArc<S>, REWEIGHT_TO_INITIAL>(a, ret, kPushWeights);
+        } else {
+          Push<PyArc<S>, REWEIGHT_TO_FINAL>(a, ret, kPushWeights);
+        }
+        return ret;
+      })
+
     .def("_RandomPath", [](const PyFST<S> &a) {
         // TODO: have something that is going to call back into the
         // python process and use that to generate the weights that are along the path
@@ -465,10 +520,12 @@ void define_class(pybind11::module &m, const char *name) {
         ArcIterator<PyFST<S> > iter(a, state);
         while(!iter.Done()) {
           auto &v = iter.Value();
-          assert(v.weight.flags == FSTWeight<S>::isSet);
+          //assert(v.weight.flags == FSTWeight<S>::isSet);
           // we are just returning the pure python object, so if it gets held
           // that will still be ok
-          ret.push_back(make_tuple(v.ilabel, v.olabel, v.nextstate, v.weight.impl));
+          const FSTWeight<S> &w = v.weight;
+          py::object oo = w.PythonObject();
+          ret.push_back(make_tuple(v.ilabel, v.olabel, v.nextstate, oo));
           iter.Next();
         }
 
@@ -492,11 +549,6 @@ void define_class(pybind11::module &m, const char *name) {
 
 PYBIND11_MODULE(openfst_wrapper_backend, m) {
   m.doc() = "Backing wrapper for OpenFST";
-
-// #define f(name, properties) \
-//   add_methods<properties>();
-
-//   f(FSTBase, kSemiring | kCommutative | kPath)
 
   define_class<kSemiring | kCommutative>(m, "FSTBase");
   define_class<kSemiring | kCommutative | kPath | kIdempotent>(m, "FSTPath");
