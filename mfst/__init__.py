@@ -155,13 +155,21 @@ class ValueWeight(WeightBase):
         return isinstance(other, ValueWeight) and self._value == other._value
 
 
-class FST(_backend.FSTBase):
+class FST(object):
     """
     Wraps a mutable FST class
     """
 
-    def __init__(self, weight_class=None):
-        super().__init__()
+    def __init__(self, fst_type='base', weight_class=None, _fst=None):
+        if _fst:
+            self._fst = _fst
+        else:
+            self._fst = {
+                # these classes are defined in c++ to wrap openfst
+                'base': _backend.FSTBase,
+                'path': _backend.FSTPath
+            }[fst_type]()
+
         if not weight_class:
             self._weight_class = ValueWeight
         else:
@@ -184,8 +192,11 @@ class FST(_backend.FSTBase):
             return None
         return self._weight_class(w)
 
+    def _wrap_fst(self, fst):
+        return type(self)(weight_class=self._weight_class, _fst=fst)
+
     def create_from_string(self, string):
-        ret = FST(weight_class=self._weight_class)
+        ret = FST(weight_class=self._weight_class, _fst=type(self._fst)())
         last = ret.add_state()
         ret.start_state = last
         for s in string:
@@ -221,20 +232,20 @@ class FST(_backend.FSTBase):
         """
         Return the number of states currently set on the fst
         """
-        return self._NumStates()
+        return self._fst._NumStates()
 
     def num_arcs(self, state):
         """
         Return the number of arcs in the fst
         """
-        return self._NumArcs()
+        return self._fst._NumArcs()
 
     @property
     def start_state(self):
         """
         Return the state id of the starting state
         """
-        return self._Start()
+        return self._fst._Start()
 
     @start_state.setter
     def start_state(self, state):
@@ -242,7 +253,7 @@ class FST(_backend.FSTBase):
         Mark a state as the start state
         """
         assert (state >= 0 and state < self.num_states), "Invalid state id"
-        return self._SetStart(state)
+        return self._fst._SetStart(state)
 
     def set_start_state(self, state):
         self.start_state = state
@@ -252,7 +263,7 @@ class FST(_backend.FSTBase):
         Add a new state to the FST
         Return this state's id
         """
-        return self._AddState()
+        return self._fst._AddState()
 
     def add_arc(self, from_state, to_state,
                 weight=1, input_label=0, output_label=0):
@@ -269,42 +280,42 @@ class FST(_backend.FSTBase):
         if isinstance(output_label, str):
             assert len(input_label) == 1, "FST string labels can only be a single character"
             output_label = ord(output_label)
-        return self._AddArc(from_state, to_state, input_label, output_label,
-                            self._make_weight(weight))
+        return self._fst._AddArc(from_state, to_state, input_label, output_label,
+                                 self._make_weight(weight))
 
     def delete_arcs(self, state):
         """
         Delete all arcs coming out of state
         """
         assert (state >= 0 and state < self.num_states), "Invalid state id"
-        return self._DeleteArcs(state)
+        return self._fst._DeleteArcs(state)
 
     def delete_states(self):
         """
         Delete all states in the FST
         """
-        return self._DeleteStates()
+        return self._fst._DeleteStates()
 
     def set_final_weight(self, state, weight=1):
         """
         Set the weight that this state transisions to the final state
         """
         assert (state >= 0 and state < self.num_states), "Invalid state id"
-        return self._SetFinal(state, self._make_weight(weight))
+        return self._fst._SetFinal(state, self._make_weight(weight))
 
     def get_final_weight(self, state):
         """
         Get the weight of transistioning to the final state
         """
         assert (state >= 0 and state < self.num_states), "Invalid state id"
-        return self._make_weight(self._FinalWeight(state))
+        return self._make_weight(self._fst._FinalWeight(state))
 
     def get_arcs(self, state):
         """
         Return the arcs coming out of some state
         """
         assert (state >= 0 and state < self.num_states), "Invalid state id"
-        for arc in self._ArcList(state):
+        for arc in self._fst._ArcList(state):
             yield ArcType(*arc)
 
     def isomorphic(self, other, delta=1.0/1024):
@@ -321,7 +332,7 @@ class FST(_backend.FSTBase):
         uses WeightBase._approx_eq to compare wieghts.
         delta: 32 bit floating point number that is passed to _approx_eq
         """
-        return self._Isomorphic(other, delta)
+        return self._fst._Isomorphic(other._fst, delta)
 
     # methods for changing the fst given anther fst
     def concat(self, other):
@@ -334,7 +345,7 @@ class FST(_backend.FSTBase):
         http://www.openfst.org/twiki/bin/view/FST/ConcatDoc
         """
         assert isinstance(other, FST)
-        return self._Concat(other)
+        return self._wrap_fst(self._fst._Concat(other._fst))
 
     def compose(self, other):
         """
@@ -345,7 +356,7 @@ class FST(_backend.FSTBase):
         http://www.openfst.org/twiki/bin/view/FST/ComposeDoc
         """
         assert isinstance(other, FST)
-        return self._Compose(other)
+        return self._wrap_fst(self._fst._Compose(other._fst))
 
     def determinize(self, delta=1.0/1024, weight_threshold=None):
         """
@@ -362,7 +373,7 @@ class FST(_backend.FSTBase):
         if weight_threshold is None:
             weight_threshold = self._weight_class()
 
-        return self._Determinize(delta, self._make_weight(weight_threshold))
+        return self._wrap_fst(self._fst._Determinize(delta, self._make_weight(weight_threshold)))
 
     def project(self, type='input'):
         """
@@ -374,11 +385,11 @@ class FST(_backend.FSTBase):
 
         if type == 'output':
             t = 0
-        elif type == 'intput':
+        elif type == 'input':
             t = 1
         else:
             raise RuntimeError("unknown project type " + type)
-        return self._Project(t)
+        return self._wrap_fst(self._fst._Project(t))
 
     def difference(self, other):
         """
@@ -389,7 +400,7 @@ class FST(_backend.FSTBase):
         http://www.openfst.org/twiki/bin/view/FST/DifferenceDoc
         """
         assert isinstance(other, FST)
-        assert self._Difference(other)
+        assert self._wrap_fst(self._fst._Difference(other))
 
     def invert(self):
         """
@@ -398,7 +409,7 @@ class FST(_backend.FSTBase):
 
         http://www.openfst.org/twiki/bin/view/FST/InvertDoc
         """
-        return self._Invert()
+        return self._wrap_fst(self._fst._Invert())
 
     def prune(self, weight):
         """
@@ -409,7 +420,15 @@ class FST(_backend.FSTBase):
 
         http://www.openfst.org/twiki/bin/view/FST/PruneDoc
         """
-        return self._Prune(self._make_weight(weight))
+        return self._wrap_fst(self._fst._Prune(self._make_weight(weight)))
+
+    def union(self, other):
+
+        pass
+
+    def intersect(self, other):
+        pass
+
 
     def random_path(self, arc_selector=None):
         """
@@ -422,7 +441,7 @@ class FST(_backend.FSTBase):
     def __str__(self):
         if self.num_states < 10:
             # if the FST is small enough that we might want to print the whole thing in the string
-            return 'FST {\n' + self._toString() + '\n}'
+            return 'FST {\n' + self._fst._toString() + '\n}'
         else:
             return 'FST(num_states={})'.format(self.num_states)
 

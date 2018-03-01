@@ -38,7 +38,7 @@ class MyWeight(mfst.WeightBase):
         print('calling string')#, type(self), dir(self))
         return 'MyWeight({})'.format(self._value)
 
-gg = mfst.FST(MyWeight)
+gg = mfst.FST('base', MyWeight)
 
 for i in range(9):
     gg.add_state()
@@ -101,6 +101,6 @@ def build_hc_fst(fst, n=3):
     fst.add_arc(h[-1], final)
 
 
-hc = mfst.FST()
+hc = mfst.FST('path')
 build_hc_fst(hc)
-hc.determinize()
+print(hc.determinize())

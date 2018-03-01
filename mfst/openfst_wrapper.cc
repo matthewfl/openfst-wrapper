@@ -61,13 +61,12 @@ bool check_is_weight(py::object &weight) {
   // zero & one ??
 }
 
-
+template<uint64 S>
 class FSTWeight {
 private:
   FSTWeight(int32 g) : impl(), flags(g) {} // the static value constructor
 public:
-
-  using ReverseWeight = FSTWeight;
+  using ReverseWeight = FSTWeight<S>;
 
   enum {
     isZero = 0x1,
@@ -90,16 +89,16 @@ public:
     flags = isSet;
   }
 
-  static const FSTWeight& Zero() {
-    static const FSTWeight zero = FSTWeight(isZero);
+  static const FSTWeight<S>& Zero() {
+    static const FSTWeight<S> zero = FSTWeight<S>(isZero);
     return zero;
   }
-  static const FSTWeight& One() {
-    static const FSTWeight one = FSTWeight(isOne);
+  static const FSTWeight<S>& One() {
+    static const FSTWeight<S> one = FSTWeight<S>(isOne);
     return one;
   }
-  static const FSTWeight& NoWeight() {
-    static const FSTWeight no_weight = FSTWeight(isNoWeight);
+  static const FSTWeight<S>& NoWeight() {
+    static const FSTWeight<S> no_weight = FSTWeight<S>(isNoWeight);
     return no_weight;
   }
 
@@ -117,7 +116,10 @@ public:
 
   // this might not be what the user wants to use for this???
   // this has to be a constexpr which means that we can't change it from python
-  static constexpr uint64 Properties () { return kSemiring | kCommutative | kPath; }
+  static constexpr uint64 Properties () {
+    return S;
+    //return kSemiring | kCommutative | kPath;
+  }
 
   bool Member() const {
     if(isBuiltIn()) {
@@ -128,21 +130,21 @@ public:
     }
   }
 
-  FSTWeight Reverse() const {
+  FSTWeight<S> Reverse() const {
     if(isBuiltIn()) {
       return *this;
     } else {
       py::object r = impl.attr("_reverse")();
-      return FSTWeight(r);
+      return FSTWeight<S>(r);
     }
   }
 
-  FSTWeight Quantize(float delta = kDelta) const {
+  FSTWeight<S> Quantize(float delta = kDelta) const {
     if(isBuiltIn()) {
       return *this;
     } else {
       py::object r = impl.attr("_quantize")(delta);
-      return FSTWeight(r);
+      return FSTWeight<S>(r);
     }
   }
 
@@ -171,68 +173,75 @@ public:
     }
   }
 
-  FSTWeight& operator=(const FSTWeight& other) {
+  FSTWeight<S>& operator=(const FSTWeight<S>& other) {
     impl = other.impl;
     flags = other.flags;
   }
 
-  virtual ~FSTWeight() {
+  virtual ~FSTWeight<S>() {
     //cout << "delete weight\n";
   }
 
 };
 
-inline FSTWeight Plus(const FSTWeight &w1, const FSTWeight &w2) {
+
+template<uint64 S>
+inline FSTWeight<S> Plus(const FSTWeight<S> &w1, const FSTWeight<S> &w2) {
   // these identity elements have to be handled specially
   // as they are the same for all semirings that are defined in python and thus contain no value
-  if(w1.flags == FSTWeight::isZero) {
+  if(w1.flags == FSTWeight<S>::isZero) {
     return w2;
   }
-  if(w2.flags == FSTWeight::isZero) {
+  if(w2.flags == FSTWeight<S>::isZero) {
     return w1;
   }
-  if(w1.flags == FSTWeight::isOne || w2.flags == FSTWeight::isOne) {
+  if(w1.flags == FSTWeight<S>::isOne || w2.flags == FSTWeight<S>::isOne) {
     throw fsterror("Trying to add with the static semiring one");
   }
-  return FSTWeight(w1.impl.attr("__add__")(w2.impl));
+  return FSTWeight<S>(w1.impl.attr("__add__")(w2.impl));
 }
 
-inline FSTWeight Times(const FSTWeight &w1, const FSTWeight &w2) {
-  if(w1.flags == FSTWeight::isOne) {
+template<uint64 S>
+inline FSTWeight<S> Times(const FSTWeight<S> &w1, const FSTWeight<S> &w2) {
+  if(w1.flags == FSTWeight<S>::isOne) {
     return w2;
   }
-  if(w2.flags == FSTWeight::isOne) {
+  if(w2.flags == FSTWeight<S>::isOne) {
     return w1;
   }
-  if(w1.flags == FSTWeight::isZero || w2.flags == FSTWeight::isZero) {
-    return FSTWeight::Zero();
+  if(w1.flags == FSTWeight<S>::isZero || w2.flags == FSTWeight<S>::isZero) {
+    return FSTWeight<S>::Zero();
   }
-  return FSTWeight(w1.impl.attr("__mul__")(w2.impl));
+  return FSTWeight<S>(w1.impl.attr("__mul__")(w2.impl));
 }
 
-inline FSTWeight Divide(const FSTWeight &w1, const FSTWeight &w2) {
-  if(w2.flags == FSTWeight::isOne) {
+template<uint64 S>
+inline FSTWeight<S> Divide(const FSTWeight<S> &w1, const FSTWeight<S> &w2) {
+  if(w2.flags == FSTWeight<S>::isOne) {
     return w1;
   }
   // so this could construct a 1 element or try and use rdiv
-  return FSTWeight(w1.impl.attr("__div__")(w2.impl));
+  return FSTWeight<S>(w1.impl.attr("__div__")(w2.impl));
 }
 
-inline FSTWeight Divide(const FSTWeight &w1, const FSTWeight &w2, const DivideType &type) {
+template<uint64 S>
+inline FSTWeight<S> Divide(const FSTWeight<S> &w1, const FSTWeight<S> &w2, const DivideType &type) {
   // TODO: there are left and right divide types that could be passed to python???
   // that might be important depending on which ring we are in
   return Divide(w1, w2);
 }
 
-inline FSTWeight Power(const FSTWeight &w1, int n) {
+template<uint64 S>
+inline FSTWeight<S> Power(const FSTWeight<S> &w1, int n) {
   if(w1.isBuiltIn()) {
     return w1;
   } else {
-    return FSTWeight(w1.impl.attr("__pow__")(n));
+    return FSTWeight<S>(w1.impl.attr("__pow__")(n));
   }
 }
 
-inline bool operator==(FSTWeight const &w1, FSTWeight const &w2) {
+template<uint64 S>
+inline bool operator==(FSTWeight<S> const &w1, FSTWeight<S> const &w2) {
   if(w1.isBuiltIn()) {
     return w1.flags == w2.flags;  // if this is a built in value then it will have the same pointer
   } else {
@@ -243,11 +252,13 @@ inline bool operator==(FSTWeight const &w1, FSTWeight const &w2) {
   }
 }
 
-inline bool operator!=(FSTWeight const &w1, FSTWeight const &w2) {
+template<uint64 S>
+inline bool operator!=(FSTWeight<S> const &w1, FSTWeight<S> const &w2) {
   return !(w1 == w2);
 }
 
-inline bool ApproxEqual(FSTWeight const &w1, FSTWeight const &w2, const float &delta) {
+template<uint64 S>
+inline bool ApproxEqual(FSTWeight<S> const &w1, FSTWeight<S> const &w2, const float &delta) {
   if(w1.isBuiltIn()) {
     return w1.flags == w2.flags;  // if this is a built in value then it will have the same pointer
   } else {
@@ -258,28 +269,32 @@ inline bool ApproxEqual(FSTWeight const &w1, FSTWeight const &w2, const float &d
   }
 }
 
-inline bool ApproxEqual(FSTWeight const &w1, FSTWeight const &w2, const float &delta, const bool &error) {
+template<uint64 S>
+inline bool ApproxEqual(FSTWeight<S> const &w1, FSTWeight<S> const &w2, const float &delta, const bool &error) {
   return ApproxEqual(w1, w2, delta);
 }
 
-std::ostream &operator<<(std::ostream &os, const FSTWeight &w) {
+template<uint64 S>
+inline std::ostream &operator<<(std::ostream &os, const FSTWeight<S> &w) {
   return w.Write(os);
 }
 
-std::istream &operator>>(std::istream &is, const FSTWeight &w) {
+template<uint64 S>
+inline std::istream &operator>>(std::istream &is, const FSTWeight<S> &w) {
   throw fsterror("python weights do not support loading");
 }
 
+template<uint64 S>
+using PyArc = ArcTpl<FSTWeight<S>>;
+template<uint64 S>
+using PyFST = VectorFst<PyArc<S>, VectorState<PyArc<S> > >;
 
-using PyArc = ArcTpl<FSTWeight>;
-using PyFST = VectorFst<PyArc, VectorState<PyArc> >;
+// PyFST<S>* create_fst() {
+//   return new PyFST();
+// }
 
-PyFST* create_fst() {
-  return new PyFST();
-}
-
-
-void add_arc(PyFST &self, int64 from, int64 to,
+template<uint64 S>
+void add_arc(PyFST<S> &self, int64 from, int64 to,
              int64 input_label, int64 output_label, py::object weight) {
   // TODO: check if the weight is the correct python instance
 
@@ -287,28 +302,30 @@ void add_arc(PyFST &self, int64 from, int64 to,
     throw fsterror("weight is missing required method");
   }
 
-  FSTWeight w1(weight);
-  PyArc a(input_label, output_label, w1, to);
+  FSTWeight<S> w1(weight);
+  PyArc<S> a(input_label, output_label, w1, to);
   //cout << "before add\n";
   self.AddArc(from, a);
   //cout << "after add\n";
 }
 
-void set_final(PyFST &self, int64 state, py::object weight) {
+template<uint64 S>
+void set_final(PyFST<S> &self, int64 state, py::object weight) {
   if(!check_is_weight(weight)) {
     throw fsterror("weight is missing required method");
   }
 
-  FSTWeight w1(weight);
+  FSTWeight<S> w1(weight);
   self.SetFinal(state, w1);
 }
 
-py::object final_weight(PyFST &self, int64 state) {
-  FSTWeight finalW = self.Final(state);
+template<uint64 S>
+py::object final_weight(PyFST<S> &self, int64 state) {
+  FSTWeight<S> finalW = self.Final(state);
   if(finalW.isBuiltIn()) {
-    if(finalW.flags == FSTWeight::isZero) {
+    if(finalW.flags == FSTWeight<S>::isZero) {
       return py::cast(0);
-    } else if(finalW.flags == FSTWeight::isOne) {
+    } else if(finalW.flags == FSTWeight<S>::isOne) {
       return py::cast(1);
     } else {
       // invalid
@@ -316,7 +333,7 @@ py::object final_weight(PyFST &self, int64 state) {
     }
   }
 
-  assert(finalW.flags == FSTWeight::isSet);
+  assert(finalW.flags == FSTWeight<S>::isSet);
 
   py::object r =  finalW.impl; // this should still be holding onto the handle
 
@@ -348,89 +365,92 @@ public:
 };
 */
 
-PYBIND11_MODULE(openfst_wrapper_backend, m) {
-  m.doc() = "Backing wrapper for OpenFST";
+template<uint64 S>
+void define_class(pybind11::module &m, const char *name) {
 
-  py::class_<PyFST>(m, "FSTBase")
-    .def(py::init<>(&create_fst))
-#define d(name) .def("_" #name, &PyFST:: name)
-    .def("_AddArc", &add_arc) // keep the weight alive when added
+  py::class_<PyFST<S> >(m, name)
+    .def(py::init<>())
+
+#define d(name) .def("_" #name, & PyFST<S> :: name)
+    .def("_AddArc", &add_arc<S>) // keep the weight alive when added
     d(AddState)
     // there are more than one method with this name but different type signatures
-    .def("_DeleteArcs", [](PyFST *m, int64 v) { if(m) m->DeleteArcs(v); })
-    .def("_DeleteStates", [](PyFST *m) { if(m) m->DeleteStates(); })
+    .def("_DeleteArcs", [](PyFST<S> *m, int64 v) { if(m) m->DeleteArcs(v); })
+
+    .def("_DeleteStates", [](PyFST<S> *m) { if(m) m->DeleteStates(); })
 
     d(NumStates)
     d(ReserveArcs)
     d(ReserveStates)
 
-    .def("_SetFinal", &set_final)
+    .def("_SetFinal", &set_final<S>)
     d(SetStart)
 
     d(NumArcs)
     d(Start)
 
-    .def("_FinalWeight", &final_weight)
+    .def("_FinalWeight", &final_weight<S>)
 #undef d
 
 
+
     // compare two FST methods
-    .def("_Isomorphic", [](PyFST &a, PyFST  &b, float delta) {
+    .def("_Isomorphic", [](const PyFST<S> &a, const PyFST<S> &b, float delta) {
         return Isomorphic(a, b, delta);
       })
 
     // methods that will generate a new FST or
-    .def("_Concat", [](const PyFST &a, PyFST &b) {
-        PyFST *ret = b.Copy();
+    .def("_Concat", [](const PyFST<S> &a, PyFST<S> &b) {
+        PyFST<S> *ret = b.Copy();
         Concat(a, ret);
         return ret;
       })
 
 
-    .def("_Compose", [](const PyFST &a, const PyFST &b) {
-        PyFST *ret = create_fst();
+    .def("_Compose", [](const PyFST<S> &a, const PyFST<S> &b) {
+        PyFST<S> *ret = new PyFST<S>();
         Compose(a,b, ret);
         return ret;
       })
 
-    .def("_Determinize", [](const PyFST &a, float delta, py::object weight) {
-        FSTWeight weight_threshold(weight);
+    .def("_Determinize", [](const PyFST<S> &a, float delta, py::object weight) {
+        FSTWeight<S> weight_threshold(weight);
 
-        PyFST *ret = create_fst();
+        PyFST<S> *ret = new PyFST<S>();
 
-        DeterminizeOptions<PyArc> ops(delta, weight_threshold);
+        DeterminizeOptions<PyArc<S> > ops(delta, weight_threshold);
         Determinize(a, ret, ops);
         return ret;
       })
 
-    .def("_Project", [](const PyFST &a, int type) {
-        PyFST *ret = create_fst();
+    .def("_Project", [](const PyFST<S> &a, int type) {
+        PyFST<S> *ret = new PyFST<S>();
 
         ProjectType typ = type ? PROJECT_INPUT : PROJECT_OUTPUT;
         Project(a, ret, typ);
         return ret;
       })
 
-    .def("_Difference", [](const PyFST &a, const PyFST &b) {
-        PyFST *ret = create_fst();
+    .def("_Difference", [](const PyFST<S> &a, const PyFST<S> &b) {
+        PyFST<S> *ret = new PyFST<S>();
         Difference(a, b, ret);
         return ret;
       })
 
-    .def("_Invert", [](const PyFST &a) {
-        PyFST *ret = a.Copy();
+    .def("_Invert", [](const PyFST<S> &a) {
+        PyFST<S> *ret = a.Copy();
         Invert(ret);
         return ret;
       })
 
-    .def("_Prune", [](const PyFST &a, py::object weight) {
-        FSTWeight weight_threshold(weight);
-        PyFST *ret = create_fst();
+    .def("_Prune", [](const PyFST<S> &a, py::object weight) {
+        FSTWeight<S> weight_threshold(weight);
+        PyFST<S> *ret = new PyFST<S>();
         Prune(a, ret, weight_threshold);
         return ret;
       })
 
-    .def("_RandomPath", [](const PyFST &a) {
+    .def("_RandomPath", [](const PyFST<S> &a) {
         // TODO: have something that is going to call back into the
         // python process and use that to generate the weights that are along the path
 
@@ -438,22 +458,22 @@ PYBIND11_MODULE(openfst_wrapper_backend, m) {
         return false;
       })
 
-    .def("_ArcList", [](const PyFST &a, int64 state) {
+    .def("_ArcList", [](const PyFST<S> &a, int64 state) {
         // input label, output label, to state, weight
         vector<py::tuple> ret;
 
-        ArcIterator<PyFST> iter(a, state);
+        ArcIterator<PyFST<S> > iter(a, state);
         while(!iter.Done()) {
           auto &v = iter.Value();
-          assert(v.weight.flags == FSTWeight::isSet);
+          assert(v.weight.flags == FSTWeight<S>::isSet);
           // we are just returning the pure python object, so if it gets held
           // that will still be ok
           ret.push_back(make_tuple(v.ilabel, v.olabel, v.nextstate, v.weight.impl));
           iter.Next();
         }
 
-        FSTWeight finalW = a.Final(state);
-        if(finalW.flags == FSTWeight::isSet) {
+        FSTWeight<S> finalW = a.Final(state);
+        if(finalW.flags == FSTWeight<S>::isSet) {
           // then there is something here that we should push I guess?
           ret.push_back(make_tuple(0, 0, -1, finalW.impl));
         }
@@ -461,13 +481,24 @@ PYBIND11_MODULE(openfst_wrapper_backend, m) {
         return ret;
       })
 
-    .def("_toString", [](const PyFST &a) {
+    .def("_toString", [](const PyFST<S> &a) {
         ostringstream out;
         fst::script::PrintFst(a, out);
         return out.str();
-      })
-
+      });
 
     ;
+}
+
+PYBIND11_MODULE(openfst_wrapper_backend, m) {
+  m.doc() = "Backing wrapper for OpenFST";
+
+// #define f(name, properties) \
+//   add_methods<properties>();
+
+//   f(FSTBase, kSemiring | kCommutative | kPath)
+
+  define_class<kSemiring | kCommutative>(m, "FSTBase");
+  define_class<kSemiring | kCommutative | kPath | kIdempotent>(m, "FSTPath");
 
 }
