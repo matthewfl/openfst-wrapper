@@ -8,11 +8,11 @@ import os
 
 try:
     import pybind11
-except ImportError:
+except (ModuleNotFoundError, ImportError) as e:
     # this hack b/c we need to import this in the setup file and just listing it in the depends
     # isn't sufficent
     r = os.system('pip install pybind11')
-    assert r
+    assert r == 0, "failed to install pybind11"
     import pybind11
 
 openfst_version = '1.6.6'
@@ -20,7 +20,8 @@ openfst_version = '1.6.6'
 if not os.path.exists(os.path.join(sys.prefix, 'include', 'fst', 'version-'+openfst_version)):
     # then there are no open fst headers where we expect them
     # -__-
-    cmd = "cd {dir} && ./configure CXX='g++ -g' CC='gcc -g' prefix={prefix} --enable-grm --enable-bin --enable-ngram-fsts --enable-const-fsts --enable-linear-fsts && make -j {threads} && make install".format(
+    # CXX='g++ -g' CC='gcc -g'  (for debugging)
+    cmd = "cd {dir} && make clean && ./configure prefix={prefix} --enable-grm --enable-bin --enable-ngram-fsts --enable-const-fsts --enable-linear-fsts && make -j {threads} && make install".format(
         dir=os.path.join(os.path.dirname(os.path.abspath(__file__)), 'openfst'),
         prefix=sys.prefix,
         threads=max(os.cpu_count() - 2, 1)

@@ -434,19 +434,46 @@ class FST(_backend.FSTBase):
         import os
         import json
         ret = ''
-        if not _loaded_html_library:
-            # global as only do this once per ipython notebook
-            with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'd3.v4.min.js'), 'r') as f:
-                      ret += '<script>\n'
-                      ret += f.read()
-                      ret += '\n</script>'
+        if self.num_states == 0:
+            return '<code>Empty FST</code>'
+        if True or not _loaded_html_library:
+        #     # global as only do this once per ipython notebook
+        #     with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'd3.v4.min.js'), 'r') as f:
+        #               ret += '<script>\n'
+        #               ret += f.read()
+        #               ret += '\n</script>'
 
-            with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'dagre-d3.min.js'), 'r') as f:
-                      ret += '<script>\n'
-                      ret += f.read()
-                      ret += '\n</script>'
+        #     with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'dagre-d3.min.js'), 'r') as f:
+        #               ret += '<script>\n'
+        #               ret += f.read()
+        #               ret += '\n</script>'
 
+            # sigh...loading these as external files
+            # ipython is loading with require js
             ret += '''
+            <script>
+            require.config({
+            paths: {
+            "d3": "https://cdnjs.cloudflare.com/ajax/libs/d3/4.13.0/d3",
+            "dagreD3": "https://cdnjs.cloudflare.com/ajax/libs/dagre-d3/0.6.1/dagre-d3.min"
+            }
+            });
+            </script>
+            <!--script>
+            (function() {
+            if(typeof d3 == "undefined") {
+            var script   = document.createElement("script");
+            script.type  = "text/javascript";
+            script.src   = "https://cdnjs.cloudflare.com/ajax/libs/d3/4.13.0/d3.js";
+            document.body.appendChild(script);
+
+            var script   = document.createElement("script");
+            script.type  = "text/javascript";
+            script.src   = "https://cdnjs.cloudflare.com/ajax/libs/dagre-d3/0.6.1/dagre-d3.min.js";
+            document.body.appendChild(script);
+            }
+            })();
+            </script-->
             <style>
             .node rect,
             .node circle,
@@ -467,9 +494,20 @@ class FST(_backend.FSTBase):
 
 
         obj = 'fst_' + uuid4().hex
-        ret += f'<svg width="90%" height="1500 id="{obj}"><g/></svg>'
-        ret += '<script>\n(function () {\n' # stay out of the global namespace
-        ret += 'var g = new dagreD3.graphlib.Graph().setGraph({});\n'
+        ret += f'<center><svg width=700 height="600" id="{obj}"><g/></svg></center>'
+        ret += '''
+        <script>
+        requirejs(['d3', 'dagreD3'], function() {});
+        (function render_d3() {
+        var d3, dagreD3;
+        try {
+        d3 = require('d3');
+        dagreD3 = require('dagreD3');
+        } catch { setTimeout(render_d3, 50); return; } // requirejs is broken on external domains
+        //alert("loaded");
+        var g = new dagreD3.graphlib.Graph().setGraph({});
+
+        '''
 
         # here we are actually going to read the states from the FST and generate nodes for them
         # in the output source code
@@ -482,14 +520,14 @@ class FST(_backend.FSTBase):
                     continue
                 label = ''
                 if arc.ilabel == 0:
-                    label += '&epsilon;'
+                    label += '\u03B5'  # epsilon
                 elif arc.ilabel < 33:
                     label += str(arc.ilabel)
                 else:
                     label += chr(arc.ilabel)
                 label += ':'
                 if arc.olabel == 0:
-                    label += '&epsilon;'
+                    label += '\u03B5'
                 elif arc.olabel < 33:
                     label += str(arc.olabel)
                 else:
@@ -506,7 +544,7 @@ class FST(_backend.FSTBase):
         ret += f'g.node("state_{self.start_state}").style = "fill: #7f7"; \n'
 
 
-        ret += f'var svg = d3.select("{obj}"); \n'
+        ret += f'var svg = d3.select("#{obj}"); \n'
         ret += '''
         var inner = svg.select("g");
 
@@ -526,7 +564,7 @@ class FST(_backend.FSTBase):
         var initialScale = 0.75;
         svg.call(zoom.transform, d3.zoomIdentity.translate((svg.attr("width") - g.graph().width * initialScale) / 2, 20).scale(initialScale));
 
-        svg.attr('height', g.graph().height * initialScale + 40);
+        svg.attr('height', g.graph().height * initialScale + 140);
         })();
         </script>
         '''
