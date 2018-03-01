@@ -440,7 +440,6 @@ PYBIND11_MODULE(openfst_wrapper_backend, m) {
       })
 
     .def("_toString", [](const PyFST &a) {
-        cout << "asdf\n";
         ostringstream out;
         fst::script::PrintFst(a, out);
         return out.str();

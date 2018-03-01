@@ -3,6 +3,7 @@ from collections import namedtuple as _namedtuple
 
 ArcType = _namedtuple('Arc', ['ilabel', 'olabel', 'nextstate', 'weight'])
 
+_loaded_html_library = False
 
 class WeightBase(object):
 
@@ -420,5 +421,113 @@ class FST(_backend.FSTBase):
         else:
             return 'FST(num_states={})'.format(self.num_states)
 
-    def __repl__(self):
+    def __repr__(self):
         return str(self)
+
+    def _repr_html_(self):
+        """
+        When returned from an ipython cell, this will generate the FST visualization
+        """
+        # mostly copied from dagre-d3 tutorial / demos
+        global _loaded_html_library
+        from uuid import uuid4
+        import os
+        import json
+        ret = ''
+        if not _loaded_html_library:
+            # global as only do this once per ipython notebook
+            with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'd3.v4.min.js'), 'r') as f:
+                      ret += '<script>\n'
+                      ret += f.read()
+                      ret += '\n</script>'
+
+            with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'dagre-d3.min.js'), 'r') as f:
+                      ret += '<script>\n'
+                      ret += f.read()
+                      ret += '\n</script>'
+
+            ret += '''
+            <style>
+            .node rect,
+            .node circle,
+            .node ellipse {
+            stroke: #333;
+            fill: #fff;
+            stroke-width: 1px;
+            }
+
+            .edgePath path {
+            stroke: #333;
+            fill: #333;
+            stroke-width: 1.5px;
+            }
+            </style>
+            '''
+            _loaded_html_library = True
+
+
+        obj = 'fst_' + uuid4().hex
+        ret += f'<svg width="90%" height="1500 id="{obj}"><g/></svg>'
+        ret += '<script>\n(function () {\n' # stay out of the global namespace
+        ret += 'var g = new dagreD3.graphlib.Graph().setGraph({});\n'
+
+        # here we are actually going to read the states from the FST and generate nodes for them
+        # in the output source code
+
+        for sid in range(self.num_states):
+            ret += f'g.setNode("state_{sid}", {{ label: "{sid}" }});\n'
+        for sid in range(self.num_states):
+            for arc in self.get_arcs(sid):
+                if arc.nextstate == -1:
+                    continue
+                label = ''
+                if arc.ilabel == 0:
+                    label += '&epsilon;'
+                elif arc.ilabel < 33:
+                    label += str(arc.ilabel)
+                else:
+                    label += chr(arc.ilabel)
+                label += ':'
+                if arc.olabel == 0:
+                    label += '&epsilon;'
+                elif arc.olabel < 33:
+                    label += str(arc.olabel)
+                else:
+                    label += chr(arc.olabel)
+                label += f'/{arc.weight}'
+
+                ret += f'g.setEdge("state_{sid}", "state_{arc.nextstate}", {{ arrowhead: "vee", label: {json.dumps(label)} }});\n'
+
+            # TODO: figure out ending weight and how to encode that in the graph?
+            # atm this is just skipping the ending weight
+
+
+        # make the start state green
+        ret += f'g.node("state_{self.start_state}").style = "fill: #7f7"; \n'
+
+
+        ret += f'var svg = d3.select("{obj}"); \n'
+        ret += '''
+        var inner = svg.select("g");
+
+        // Set up zoom support
+        var zoom = d3.zoom().on("zoom", function() {
+        inner.attr("transform", d3.event.transform);
+        });
+        svg.call(zoom);
+
+        // Create the renderer
+        var render = new dagreD3.render();
+
+        // Run the renderer. This is what draws the final graph.
+        render(inner, g);
+
+        // Center the graph
+        var initialScale = 0.75;
+        svg.call(zoom.transform, d3.zoomIdentity.translate((svg.attr("width") - g.graph().width * initialScale) / 2, 20).scale(initialScale));
+
+        svg.attr('height', g.graph().height * initialScale + 40);
+        })();
+        </script>
+        '''
+        return ret

@@ -78,3 +78,6 @@ gg = mfst.FST()
 sf = gg.create_from_string('test')
 print(sf)
 assert sf.get_string() == 'test'
+
+assert sf._repr_html_() is not None
+print(sf._repr_html_())
