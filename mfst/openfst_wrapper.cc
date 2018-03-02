@@ -21,6 +21,7 @@
 #include <fst/mutable-fst.h>
 #include <fst/vector-fst.h>
 #include <fst/arc.h>
+#include <fst/util.h>
 
 // fst operations that we are supporting
 #include <fst/isomorphic.h>
@@ -37,7 +38,6 @@
 #include <fst/arcsort.h>
 #include <fst/minimize.h>
 
-
 #include <fst/script/print.h>
 
 
@@ -46,12 +46,36 @@ using namespace fst;
 namespace py = pybind11;
 
 // this error should just become a runtime error in python land
-class fsterror : public exception {
+class fsterror : public std::exception {
 private:
   const char* error;
+  string str;
 public:
   fsterror(const char *e): error(e) {}
+  fsterror(string s) : str(s), error(s.c_str()) { }
   virtual const char* what() { return error; }
+};
+
+class ErrorCatcher {
+  // hijack the std::cerr buffer and get any errors that openfst produces.
+  // this will then be thrown to the python process
+  std::streambuf *backup;
+  ostringstream buff;
+public:
+  ErrorCatcher() {
+    backup = cerr.rdbuf();
+    cerr.rdbuf(buff.rdbuf());
+  }
+  ~ErrorCatcher() noexcept(false) {
+    // reset
+    cerr.rdbuf(backup);
+    string e = buff.str();
+    if(!e.empty()) {
+      PyErr_SetString(PyExc_RuntimeError, e.c_str());
+      //throw fsterror(e);
+      throw py::error_already_set();
+    }
+  }
 };
 
 
@@ -199,9 +223,9 @@ public:
     if(flags == isSet) {
       return impl;
     } else if(flags == isOne) {
-      return py::cast(1);
+      return py::cast("__FST_ONE__");
     } else if(flags == isZero) {
-      return py::cast(0);
+      return py::cast("__FST_ZERO__");
     } else if(flags == isCount) {
       throw fsterror("trying to statically build counting python object");
     } else {
@@ -409,6 +433,7 @@ template<uint64 S>
 void add_arc(PyFST<S> &self, int64 from, int64 to,
              int64 input_label, int64 output_label, py::object weight) {
   // TODO: check if the weight is the correct python instance
+  ErrorCatcher e;
 
   if(!check_is_weight(weight)) {
     throw fsterror("weight is missing required method");
@@ -423,6 +448,8 @@ void add_arc(PyFST<S> &self, int64 from, int64 to,
 
 template<uint64 S>
 void set_final(PyFST<S> &self, int64 state, py::object weight) {
+  ErrorCatcher e;
+
   if(!check_is_weight(weight)) {
     throw fsterror("weight is missing required method");
   }
@@ -433,6 +460,8 @@ void set_final(PyFST<S> &self, int64 state, py::object weight) {
 
 template<uint64 S>
 py::object final_weight(PyFST<S> &self, int64 state) {
+  ErrorCatcher e;
+
   FSTWeight<S> finalW = self.Final(state);
   py::object r = finalW.PythonObject();
   // if(finalW.isBuiltIn()) {
@@ -494,9 +523,12 @@ public:
   }
 };
 
-
 template<uint64 S>
 void define_class(pybind11::module &m, const char *name) {
+
+  // prevent fst from killing the process
+  // we just need to set this somewhere before using openfst
+  FLAGS_fst_error_fatal = false;
 
   py::class_<PyFST<S> >(m, name)
     .def(py::init<>())
@@ -526,11 +558,13 @@ void define_class(pybind11::module &m, const char *name) {
 
     // compare two FST methods
     .def("_Isomorphic", [](const PyFST<S> &a, const PyFST<S> &b, float delta) {
+        ErrorCatcher e;
         return Isomorphic(a, b, delta);
       })
 
     // methods that will generate a new FST or
     .def("_Concat", [](const PyFST<S> &a, PyFST<S> &b) {
+        ErrorCatcher e;
         PyFST<S> *ret = b.Copy();
         Concat(a, ret);
         return ret;
@@ -538,6 +572,7 @@ void define_class(pybind11::module &m, const char *name) {
 
 
     .def("_Compose", [](const PyFST<S> &a, const PyFST<S> &b) {
+        ErrorCatcher e;
         PyFST<S> *ret = new PyFST<S>();
         // we have to sort the arcs such that this can be compared between objects
         IOLabelCompare<PyArc<S> > comp;
@@ -550,6 +585,7 @@ void define_class(pybind11::module &m, const char *name) {
       })
 
     .def("_Determinize", [](const PyFST<S> &a, float delta, py::object weight) {
+        ErrorCatcher e;
         FSTWeight<S> weight_threshold(weight);
 
         PyFST<S> *ret = new PyFST<S>();
@@ -560,6 +596,7 @@ void define_class(pybind11::module &m, const char *name) {
       })
 
     .def("_Project", [](const PyFST<S> &a, int type) {
+        ErrorCatcher e;
         PyFST<S> *ret = new PyFST<S>();
 
         ProjectType typ = type ? PROJECT_INPUT : PROJECT_OUTPUT;
@@ -568,18 +605,21 @@ void define_class(pybind11::module &m, const char *name) {
       })
 
     .def("_Difference", [](const PyFST<S> &a, const PyFST<S> &b) {
+        ErrorCatcher e;
         PyFST<S> *ret = new PyFST<S>();
         Difference(a, b, ret);
         return ret;
       })
 
     .def("_Invert", [](const PyFST<S> &a) {
+        ErrorCatcher e;
         PyFST<S> *ret = a.Copy();
         Invert(ret);
         return ret;
       })
 
     .def("_Prune", [](const PyFST<S> &a, py::object weight) {
+        ErrorCatcher e;
         FSTWeight<S> weight_threshold(weight);
         PyFST<S> *ret = new PyFST<S>();
         Prune(a, ret, weight_threshold);
@@ -593,12 +633,14 @@ void define_class(pybind11::module &m, const char *name) {
       })
 
     .def("_Union", [](const PyFST<S> &a, const PyFST<S> &b) {
+        ErrorCatcher e;
         PyFST<S> *ret = a.Copy();
         Union(ret, b);
         return ret;
       })
 
     .def("_Push", [](const PyFST<S> &a, int mode) {
+        ErrorCatcher e;
         PyFST<S> *ret = new PyFST<S>();
         if(mode == 0) {
           Push<PyArc<S>, REWEIGHT_TO_INITIAL>(a, ret, kPushWeights);
@@ -618,6 +660,7 @@ void define_class(pybind11::module &m, const char *name) {
 
     .def("_ArcList", [](const PyFST<S> &a, int64 state) {
         // input label, output label, to state, weight
+        ErrorCatcher e;
         vector<py::tuple> ret;
 
         ArcIterator<PyFST<S> > iter(a, state);
@@ -642,6 +685,7 @@ void define_class(pybind11::module &m, const char *name) {
       })
 
     .def("_toString", [](const PyFST<S> &a) {
+        ErrorCatcher e;
         ostringstream out;
         fst::script::PrintFst(a, out);
         return out.str();
@@ -656,4 +700,13 @@ PYBIND11_MODULE(openfst_wrapper_backend, m) {
   define_class<kSemiring | kCommutative>(m, "FSTBase");
   define_class<kSemiring | kCommutative | kPath | kIdempotent>(m, "FSTPath");
 
+  //static py::exception<fsterror> ex(m, "FSTInternalError");
+  // py::register_exception_translator([](std::exception_ptr p) {
+  //     try {
+  //       if (p) std::rethrow_exception(p);
+  //     } catch (const fsterror &e) {
+  //       // Set MyException as the active python error
+  //       ex(e.what());
+  //     }
+  //   });
 }

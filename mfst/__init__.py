@@ -190,14 +190,14 @@ class FST(object):
         if isinstance(w, self._weight_class):
             return w
         assert not isinstance(w, WeightBase), "Can not mix different types of weights in a FST"
-        if isinstance(w, int):
-            if w == 0:
-                return self._weight_class.zero()
-            elif w == 1:
-                return self._weight_class.one()
-        if isinstance(w, str) and w == '__FST_INVALID__':
+        if isinstance(w, str):
             # this can be returned by the C++ binding in the case that there is an invalid state
-            return None
+            if w == '__FST_INVALID__':
+                return None
+            elif w == '__FST_ONE__':
+                return self._weight_class.one()
+            elif w == '__FST_ZERO__':
+                return self._weight_class.zero()
         return self._weight_class(w)
 
     def _wrap_fst(self, fst):
@@ -280,7 +280,7 @@ class FST(object):
         return self._fst._AddState()
 
     def add_arc(self, from_state, to_state,
-                weight=1, input_label=0, output_label=0):
+                weight='__FST_ONE__', input_label=0, output_label=0):
         """
         Add an arc between states from->to with weight (default 1).
         input_label and output label should be ints that map to a label (0 == epsilon)
@@ -313,7 +313,7 @@ class FST(object):
         """
         return self._fst._DeleteStates()
 
-    def set_final_weight(self, state, weight=1):
+    def set_final_weight(self, state, weight='__FST_ONE__'):
         """
         Set the weight that this state transisions to the final state
         """
@@ -576,7 +576,7 @@ class FST(object):
         for sid in range(self.num_states):
             finalW = ''
             ww = self._fst._FinalWeight(sid)
-            if not isinstance(ww, int) or ww != 0:
+            if not isinstance(ww, str) or ww != '__FST_ZERO__':  # look at at the raw returned value to see if it is zero (unset)
                 ww = self._make_weight(ww)
                 finalW = f'\n({ww})'
             label = f'{sid}{finalW}'
