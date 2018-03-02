@@ -12,6 +12,11 @@
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 
+#ifdef __GNUC__
+// openfst causes this warning to go off a lot
+#pragma GCC diagnostic ignored "-Wsign-compare"
+#endif
+
 #include <fst/fst.h>
 #include <fst/mutable-fst.h>
 #include <fst/vector-fst.h>
@@ -113,7 +118,7 @@ public:
 
   bool isBuiltIn() const {
     assert(flags != 0);
-    return (flags & (isZero | isOne | isNoWeight)) != 0;
+    return (flags & (isZero | isOne | isNoWeight | isCount)) != 0;
   }
 
   static const string& Type() {
@@ -132,7 +137,7 @@ public:
 
   bool Member() const {
     if(isBuiltIn()) {
-      return (flags & (isOne | isZero)) != 0;
+      return (flags & (isOne | isZero | isCount)) != 0;
     } else {
       py::object r = impl.attr("_member")();
       return r.cast<bool>();
@@ -141,6 +146,7 @@ public:
 
   FSTWeight<S> Reverse() const {
     if(isBuiltIn()) {
+      // TODO: this should print a warning or something
       return *this;
     } else {
       py::object r = impl.attr("_reverse")();
@@ -164,6 +170,8 @@ public:
         return os << "(1)" ;
       } else if(flags == isZero) {
         return os << "(0)";
+      } else if(flags == isCount) {
+        return os << "(" << count << ")";
       } else {
         return os << "(invalid)";
       }
@@ -175,7 +183,7 @@ public:
 
   size_t Hash() const {
     if(isBuiltIn()) {
-      return flags;
+      return flags + count;
     } else {
       py::object r = impl.attr("__hash__")();
       return r.cast<size_t>();
@@ -194,27 +202,42 @@ public:
       return py::cast(1);
     } else if(flags == isZero) {
       return py::cast(0);
+    } else if(flags == isCount) {
+      throw fsterror("trying to statically build counting python object");
     } else {
       return py::cast("__FST_INVALID__");
     }
   }
 
-  py::object buildObject(py::object &other) const {
+  py::object buildObject(const py::object &other) const {
     // in the case that we are just wrapping a count, we still want to construct some object
     // that can be used to track the semiring operations
-    py::object ret = other.attr("zero")(); // get the zero element
-    py::object v = other.attr("one")();
-    uint32 i = count;
-    // build this object using multiple add instructions as we do not know how the prod and multiply interact with eachother otherwise
-    while(i) {
-      if(i & 0x1) {
-        ret = ret.attr("__add__")(v);
+    if(flags == isSet) {
+      return impl;
+    } else if(flags == isOne) {
+      return other.attr("one")();
+    } else if(flags == isZero) {
+      return other.attr("zero")();
+    } else if(flags == isNoWeight) {
+      // unsure what could be done here
+      return py::cast("__FST_INVALID__");
+    } else {
+      assert(flags == isCount);
+      py::object ret = other.attr("zero")(); // get the zero element
+      py::object v = other.attr("one")();
+      uint32 i = count;
+      // build this object using multiple add instructions as we do not know how the prod and multiply interact with eachother otherwise
+      // TODO: check properties of the semiring and determine if we need to actually do this adding operation
+      while(i) {
+        if(i & 0x1) {
+          ret = ret.attr("__add__")(v);
+        }
+        i >>= 1;
+        if(!i) break;
+        v = v.attr("__add__")(v);
       }
-      i >>= 1;
-      if(!i) break;
-      v = v.attr("__add__")(v);
+      return ret;
     }
-    return ret;
   }
 
   virtual ~FSTWeight<S>() {
@@ -235,9 +258,20 @@ inline FSTWeight<S> Plus(const FSTWeight<S> &w1, const FSTWeight<S> &w2) {
     return w1;
   }
   if(w1.flags == FSTWeight<S>::isOne || w2.flags == FSTWeight<S>::isOne) {
-    throw fsterror("Trying to add with the static semiring one");
+    return FSTWeight<S>(2, true); // the counting element
+    //throw fsterror("Trying to add with the static semiring one");
   }
-  return FSTWeight<S>(w1.impl.attr("__add__")(w2.impl));
+  py::object o1 = w1.impl;
+  if(w1.flags == FSTWeight<S>::isCount) {
+    if(w2.flags == FSTWeight<S>::isCount) {
+      return FSTWeight<S>(w1.count + w2.count, true);
+    } else {
+      assert(w2.flags == FSTWeight<S>::isSet);
+      o1 = w1.buildObject(w2.impl);
+    }
+  }
+  py::object o2 = w2.buildObject(o1);
+  return FSTWeight<S>(o1.attr("__add__")(o2));
 }
 
 template<uint64 S>
@@ -251,7 +285,17 @@ inline FSTWeight<S> Times(const FSTWeight<S> &w1, const FSTWeight<S> &w2) {
   if(w1.flags == FSTWeight<S>::isZero || w2.flags == FSTWeight<S>::isZero) {
     return FSTWeight<S>::Zero();
   }
-  return FSTWeight<S>(w1.impl.attr("__mul__")(w2.impl));
+  py::object o1 = w1.impl;
+  if(w1.flags == FSTWeight<S>::isCount) {
+    if(w2.flags == FSTWeight<S>::isCount) {
+      throw fsterror("Undefined multiplication between two static count elements of the field");
+    } else {
+      assert(w2.flags == FSTWeight<S>::isSet);
+      o1 = w1.buildObject(w2.impl);
+    }
+  }
+  py::object o2 = w2.buildObject(o1);
+  return FSTWeight<S>(o1.attr("__mul__")(o2));
 }
 
 template<uint64 S>
@@ -262,8 +306,19 @@ inline FSTWeight<S> Divide(const FSTWeight<S> &w1, const FSTWeight<S> &w2) {
   if(w1.flags == FSTWeight<S>::isZero) {
     return w1; // zero / anything = 0
   }
-  // so this could construct a 1 element or try and use rdiv
-  return FSTWeight<S>(w1.impl.attr("__div__")(w2.impl));
+  py::object o1 = w1.impl;
+  if(w1.flags == FSTWeight<S>::isCount) {
+    if(w2.flags == FSTWeight<S>::isCount) {
+      throw fsterror("Undefined division between two static count elements of the field");
+    } else {
+      assert(w2.flags == FSTWeight<S>::isSet);
+      o1 = w1.buildObject(w2.impl);
+    }
+  }
+
+  py::object o2 = w2.buildObject(o1);
+
+  return FSTWeight<S>(o1.attr("__div__")(o2));
 }
 
 template<uint64 S>
@@ -276,6 +331,8 @@ inline FSTWeight<S> Divide(const FSTWeight<S> &w1, const FSTWeight<S> &w2, const
 template<uint64 S>
 inline FSTWeight<S> Power(const FSTWeight<S> &w1, int n) {
   if(w1.isBuiltIn()) {
+    if(w1.flags == FSTWeight<S>::isCount)
+      throw fsterror("Unable to construct power of static count");
     return w1;
   } else {
     return FSTWeight<S>(w1.impl.attr("__pow__")(n));
@@ -284,14 +341,21 @@ inline FSTWeight<S> Power(const FSTWeight<S> &w1, int n) {
 
 template<uint64 S>
 inline bool operator==(FSTWeight<S> const &w1, FSTWeight<S> const &w2) {
-  if(w1.isBuiltIn()) {
-    return w1.flags == w2.flags;  // if this is a built in value then it will have the same pointer
+  py::object o1 = w1.impl;
+  py::object o2 = w2.impl;
+  if(w1.isBuiltIn() && !w2.isBuiltIn()) {
+    o1 = w1.buildObject(o2);
+  } else if(!w1.isBuiltIn() && w2.isBuiltIn()) {
+    o2 = w2.buildObject(o1);
+  } else if(w1.flags == FSTWeight<S>::isCount) {
+    return w2.flags == FSTWeight<S>::isCount && w1.count == w2.count;
   } else {
-    if(w2.isBuiltIn())
-      return false;
-    py::object r = w1.impl.attr("__eq__")(w2.impl);
-    return r.cast<bool>();
+    return w1.flags == w2.flags;
   }
+
+  py::object r = o1.attr("__eq__")(o2);
+  return r.cast<bool>();
+
 }
 
 template<uint64 S>
@@ -301,14 +365,20 @@ inline bool operator!=(FSTWeight<S> const &w1, FSTWeight<S> const &w2) {
 
 template<uint64 S>
 inline bool ApproxEqual(FSTWeight<S> const &w1, FSTWeight<S> const &w2, const float &delta) {
-  if(w1.isBuiltIn()) {
-    return w1.flags == w2.flags;  // if this is a built in value then it will have the same pointer
+  py::object o1 = w1.impl;
+  py::object o2 = w2.impl;
+  if(w1.isBuiltIn() && !w2.isBuiltIn()) {
+    o1 = w1.buildObject(o2);
+  } else if(!w1.isBuiltIn() && w2.isBuiltIn()) {
+    o2 = w2.buildObject(o1);
+  } else if(w1.flags == FSTWeight<S>::isCount) {
+    return w2.flags == FSTWeight<S>::isCount && w1.count == w2.count;
   } else {
-    if(w2.isBuiltIn())
-      return false;
-    py::object r = w1.impl.attr("_approx_eq")(w2.impl, delta);
-    return r.cast<bool>();
+    return w1.flags == w2.flags;
   }
+
+  py::object r = o1.attr("_approx_eq")(o2, delta);
+  return r.cast<bool>();
 }
 
 template<uint64 S>
