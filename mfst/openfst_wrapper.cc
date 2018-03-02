@@ -86,13 +86,17 @@ bool check_is_weight(py::object &weight) {
     hasattr(weight, "__mul__") &&
     hasattr(weight, "__div__") &&
     hasattr(weight, "__pow__") &&
-    hasattr(weight, "__hash__") &&
+    // need to check that this isn't null
+    !getattr(weight, "__hash__").is_none() &&
+    //hasattr(weight, "__hash__") &&
     hasattr(weight, "__eq__") &&
     hasattr(weight, "__str__") &&
     hasattr(weight, "_member") &&
     hasattr(weight, "_quantize") &&
-    hasattr(weight, "_reverse");
-  // zero & one ??
+    hasattr(weight, "_reverse") &&
+    hasattr(weight, "_approx_eq") &&
+    hasattr(weight, "one") &&
+    hasattr(weight, "zero");
 }
 
 template<uint64 S>
@@ -209,8 +213,7 @@ public:
     if(isBuiltIn()) {
       return flags + count;
     } else {
-      py::object r = impl.attr("__hash__")();
-      return r.cast<size_t>();
+      return py::hash(impl);
     }
   }
 
@@ -249,6 +252,8 @@ public:
       assert(flags == isCount);
       py::object ret = other.attr("zero")(); // get the zero element
       py::object v = other.attr("one")();
+      if(!check_is_weight(ret) || !check_is_weight(v))
+        throw fsterror("Operation return non weight");
       uint32 i = count;
       // build this object using multiple add instructions as we do not know how the prod and multiply interact with eachother otherwise
       // TODO: check properties of the semiring and determine if we need to actually do this adding operation
@@ -260,6 +265,8 @@ public:
         if(!i) break;
         v = v.attr("__add__")(v);
       }
+      if(!check_is_weight(ret))
+        throw fsterror("Operation return non weight");
       return ret;
     }
   }
@@ -636,6 +643,13 @@ void define_class(pybind11::module &m, const char *name) {
         ErrorCatcher e;
         PyFST<S> *ret = a.Copy();
         Union(ret, b);
+        return ret;
+      })
+
+    .def("_Minimize", [](const PyFST<S> &a, double delta) {
+        ErrorCatcher e;
+        PyFST<S> *ret = a.Copy();
+        Minimize(ret, static_cast<PyFST<S>* >(nullptr), delta);
         return ret;
       })
 

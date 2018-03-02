@@ -22,7 +22,7 @@ if not os.path.exists(os.path.join(sys.prefix, 'include', 'fst', 'version-'+open
     # -__-
     # CXX='g++ -g' CC='gcc -g'  (for debugging)
     # auto reconfigure genreates something depending on the version of aclocal that is installed???
-    cmd = "cd {dir} && autoreconf -f -i && ./configure prefix={prefix} --enable-grm --enable-bin --enable-ngram-fsts --enable-const-fsts --enable-linear-fsts && make -j {threads} && make install && make clean".format(
+    cmd = "cd {dir} && autoreconf -f -i && ./configure --prefix={prefix} --enable-grm --enable-bin --enable-ngram-fsts --enable-const-fsts --enable-linear-fsts && make -j {threads} && make install && make clean".format(
         dir=os.path.join(os.path.dirname(os.path.abspath(__file__)), 'openfst'),
         prefix=sys.prefix,
         threads=max(os.cpu_count() - 2, 1)

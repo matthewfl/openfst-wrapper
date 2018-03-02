@@ -25,6 +25,10 @@ class MyWeight(mfst.WeightBase):
         print('hi from equal')
         return self._value == other._value
 
+    def __hash__(self, other):
+        print('hi from hash')
+        return hash(self._value)
+
     def _approx_eq(self, other, delta):
         print('hi from approx eq')
         return self == other

@@ -154,6 +154,12 @@ class ValueWeight(WeightBase):
     def __eq__(self, other):
         return isinstance(other, ValueWeight) and self._value == other._value
 
+    def __float__(self):
+        return float(self._value)
+
+    def __int__(self):
+        return int(self._value)
+
     def __repr__(self):
         return f'{type(self).__name__}({self._value})'
 
@@ -332,8 +338,8 @@ class FST(object):
         Return the arcs coming out of some state
         """
         assert (state >= 0 and state < self.num_states), "Invalid state id"
-        for arc in self._fst._ArcList(state):
-            yield ArcType(*arc)
+        for ilabel, olabel, nextstate, weight in self._fst._ArcList(state):
+            yield ArcType(ilabel, olabel, nextstate, self._make_weight(weight))
 
     def isomorphic(self, other, delta=1.0/1024):
         """
@@ -476,6 +482,32 @@ class FST(object):
             raise RuntimeError("Unknown direction for weight pushing")
         return self._wrap_fst(self._fst._Push(t))
 
+    def minimize(self, delta=1./1024):
+        """
+        This operation performs the minimization of deterministic weighted automata
+        and transducers.
+
+        If the input FST A is an automaton (acceptor), this operation produces the
+        minimal automaton B equivalent to A, i.e. the automata with a minimal number of
+        states that is equivalent to A.
+
+        If the input FST A is a transducer, this operation internally builds an
+        equivalent transducer with a minimal number of states. However, this minimality
+        is obtained by allowing transition having strings of symbols as output labels,
+        this known in the litterature as a real-time transducer. Such transducers are
+        not directly supported by the library. By defaut, Minimize will convert such
+        transducer by expanding each string-labeled transition into a sequence of
+        transitions. This will results in the creation of new states, hence losing the
+        minimality property. If a second output argument is given to Minimize, then the
+        first output B will be the minimal real-time transducer with each strings that
+        is the output label of a transition being mapped to a new output symbol, the
+        second output transducer C represents the mapping between new output labels and
+        old output labels. Hence, we will have that A is equivalent to B o C.
+
+        http://www.openfst.org/twiki/bin/view/FST/MinimizeDoc
+        """
+        return self._wrap_fst(self._fst._Minimize(delta))
+
     def random_path(self, arc_selector=None):
         """
 
@@ -576,7 +608,7 @@ class FST(object):
         for sid in range(self.num_states):
             finalW = ''
             ww = self._fst._FinalWeight(sid)
-            if not isinstance(ww, str) or ww != '__FST_ZERO__':  # look at at the raw returned value to see if it is zero (unset)
+            if not (isinstance(ww, str) and ww != '__FST_ZERO__'):  # look at at the raw returned value to see if it is zero (unset)
                 ww = self._make_weight(ww)
                 finalW = f'\n({ww})'
             label = f'{sid}{finalW}'
@@ -624,7 +656,7 @@ class FST(object):
         var inner = svg.select("g");
 
         // Set up zoom support
-        var zoom = d3.zoom().on("zoom", function() {
+        var zoom = d3.zoom().scaleExtent([0.3, 5]).on("zoom", function() {
         inner.attr("transform", d3.event.transform);
         });
         svg.call(zoom);
