@@ -29,6 +29,8 @@
 #include <fst/intersect.h>
 #include <fst/union.h>
 #include <fst/push.h>
+#include <fst/arcsort.h>
+#include <fst/minimize.h>
 
 
 #include <fst/script/print.h>
@@ -75,16 +77,20 @@ public:
     isZero = 0x1,
     isOne = 0x2,
     isNoWeight = 0x4,
-    isSet = 0x8
+    isSet = 0x8,
+    isCount = 0x10
   };
 
   // the python object that we are wrapping
   int16_t flags;
   py::object impl;
+  uint32 count = 0;  // represents a count in the case that it added two elements of the static semiring
 
   FSTWeight() : impl() {
     flags = isNoWeight;
   }
+
+  FSTWeight(uint32 count, bool __) : flags(isCount), count(count) {}
 
   FSTWeight(py::object i) : impl(i) {
     if(!check_is_weight(impl))
@@ -198,7 +204,8 @@ public:
     // that can be used to track the semiring operations
     py::object ret = other.attr("zero")(); // get the zero element
     py::object v = other.attr("one")();
-    uint64 i = 0;
+    uint32 i = count;
+    // build this object using multiple add instructions as we do not know how the prod and multiply interact with eachother otherwise
     while(i) {
       if(i & 0x1) {
         ret = ret.attr("__add__")(v);
@@ -251,6 +258,9 @@ template<uint64 S>
 inline FSTWeight<S> Divide(const FSTWeight<S> &w1, const FSTWeight<S> &w2) {
   if(w2.flags == FSTWeight<S>::isOne) {
     return w1;
+  }
+  if(w1.flags == FSTWeight<S>::isZero) {
+    return w1; // zero / anything = 0
   }
   // so this could construct a 1 element or try and use rdiv
   return FSTWeight<S>(w1.impl.attr("__div__")(w2.impl));
@@ -317,7 +327,7 @@ inline std::istream &operator>>(std::istream &is, const FSTWeight<S> &w) {
 }
 
 template<uint64 S>
-using PyArc = ArcTpl<FSTWeight<S>>;
+using PyArc = ArcTpl<FSTWeight<S> >;
 template<uint64 S>
 using PyFST = VectorFst<PyArc<S>, VectorState<PyArc<S> > >;
 
@@ -398,6 +408,23 @@ public:
 };
 */
 
+template<typename Arc>
+class IOLabelCompare {
+public:
+  IOLabelCompare() {}
+
+  bool operator()(const Arc &arc1, const Arc &arc2) const {
+    // try the input first otherwise the output
+    return arc1.ilabel == arc2.ilabel ? arc1.olabel < arc2.olabel : arc1.ilabel < arc2.ilabel;
+  }
+
+  uint64 Properties(uint64 props) const {
+    return (props & kArcSortProperties) | kILabelSorted |
+           (props & kAcceptor ? kOLabelSorted : 0);
+  }
+};
+
+
 template<uint64 S>
 void define_class(pybind11::module &m, const char *name) {
 
@@ -442,7 +469,13 @@ void define_class(pybind11::module &m, const char *name) {
 
     .def("_Compose", [](const PyFST<S> &a, const PyFST<S> &b) {
         PyFST<S> *ret = new PyFST<S>();
-        Compose(a,b, ret);
+        // we have to sort the arcs such that this can be compared between objects
+        IOLabelCompare<PyArc<S> > comp;
+        ArcSortFst<PyArc<S>, IOLabelCompare<PyArc<S> > > as(a, comp);
+        ArcSortFst<PyArc<S>, IOLabelCompare<PyArc<S> > > bs(b, comp);
+
+        Compose(as, bs, ret);
+        //Minimze(ret); // TODO: expose this
         return ret;
       })
 

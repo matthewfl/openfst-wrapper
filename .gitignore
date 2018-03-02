@@ -35,3 +35,4 @@ openfst/src/extensions/pdt/pdtreverse
 openfst/src/extensions/pdt/pdtshortestpath
 openfst/src/extensions/linear/fstlinear
 openfst/src/extensions/linear/fstloglinearapply
+gg.py

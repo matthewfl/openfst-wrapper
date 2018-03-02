@@ -154,6 +154,9 @@ class ValueWeight(WeightBase):
     def __eq__(self, other):
         return isinstance(other, ValueWeight) and self._value == other._value
 
+    def __repr__(self):
+        return f'{type(self).__name__}({self._value})'
+
 
 class FST(object):
     """
@@ -179,8 +182,8 @@ class FST(object):
             self._weight_class = ValueWeight
         else:
             assert issubclass(weight_class, WeightBase)
-            weight_class(0)  # check that we can construct zero and one
-            weight_class(1)
+            weight_class.zero()  # check that we can construct zero and one
+            weight_class.one()
             self._weight_class = weight_class
 
     def _make_weight(self, w):
@@ -220,6 +223,8 @@ class FST(object):
         """
         Returns the string representation in the case that there is only a single path in the fst
         """
+        if self.num_states == 0:
+            return None  # this is an empty FST
         state = self.start_state
         seen = set()
         ret = []
@@ -550,7 +555,7 @@ class FST(object):
 
 
         obj = 'fst_' + uuid4().hex
-        ret += f'<center><svg width=700 height="600" id="{obj}"><g/></svg></center>'
+        ret += f'<center><svg width="850" height="600" id="{obj}"><g/></svg></center>'
         ret += '''
         <script>
         requirejs(['d3', 'dagreD3'], function() {});
@@ -588,14 +593,18 @@ class FST(object):
                 label = ''
                 if arc.ilabel == 0:
                     label += '\u03B5'  # epsilon
-                elif arc.ilabel < 33:
+                elif arc.ilabel == 32:
+                    label += '(spc)'
+                elif arc.ilabel < 32:
                     label += str(arc.ilabel)
                 else:
                     label += chr(arc.ilabel)
                 label += ':'
                 if arc.olabel == 0:
                     label += '\u03B5'
-                elif arc.olabel < 33:
+                elif arc.olabel == 32:
+                    label += '(spc)'
+                elif arc.olabel < 32:
                     label += str(arc.olabel)
                 else:
                     label += chr(arc.olabel)
@@ -630,7 +639,7 @@ class FST(object):
         var initialScale = 0.75;
         svg.call(zoom.transform, d3.zoomIdentity.translate((svg.attr("width") - g.graph().width * initialScale) / 2, 20).scale(initialScale));
 
-        svg.attr('height', g.graph().height * initialScale + 140);
+        svg.attr('height', g.graph().height * initialScale + 50);
         })();
         </script>
         '''
