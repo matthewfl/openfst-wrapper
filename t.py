@@ -124,3 +124,5 @@ f2 = fst.create_from_string('world')
 g = f1.intersect(f2)
 print(g.full_str())
 g._repr_html_()
+
+fst.random_path()

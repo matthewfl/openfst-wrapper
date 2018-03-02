@@ -37,6 +37,9 @@
 #include <fst/push.h>
 #include <fst/arcsort.h>
 #include <fst/minimize.h>
+#include <fst/shortest-path.h>
+#include <fst/rmepsilon.h>
+#include <fst/randgen.h>
 
 #include <fst/script/print.h>
 
@@ -95,6 +98,7 @@ bool check_is_weight(py::object &weight) {
     hasattr(weight, "_quantize") &&
     hasattr(weight, "_reverse") &&
     hasattr(weight, "_approx_eq") &&
+    hasattr(weight, "_sampling_weight") &&
     hasattr(weight, "one") &&
     hasattr(weight, "zero");
 }
@@ -220,6 +224,7 @@ public:
   FSTWeight<S>& operator=(const FSTWeight<S>& other) {
     impl = other.impl;
     flags = other.flags;
+    return *this;
   }
 
   py::object PythonObject() const {
@@ -471,48 +476,72 @@ py::object final_weight(PyFST<S> &self, int64 state) {
 
   FSTWeight<S> finalW = self.Final(state);
   py::object r = finalW.PythonObject();
-  // if(finalW.isBuiltIn()) {
-  //   if(finalW.flags == FSTWeight<S>::isZero) {
-  //     return py::cast(0);
-  //   } else if(finalW.flags == FSTWeight<S>::isOne) {
-  //     return py::cast(1);
-  //   } else {
-  //     // invalid
-  //     return py::cast("");
-  //   }
-  // }
-
-  // assert(finalW.flags == FSTWeight<S>::isSet);
-
-  // py::object r =  finalW.impl; // this should still be holding onto the handle
 
   return r;
 }
-/*
 
+template<uint64 S>
 class PythonArcSelector {
 public:
-  using StateId = typename PyFST::StateId;
-  using Weight = typename PyFST::Weight;
+  using StateId = typename PyFST<S>::StateId;
+  using Weight = typename PyFST<S>::Weight;
 
   PythonArcSelector() {}
 
-  explicit PythonArcSelector(uint64 seed) : rand_(seed) {}
+  explicit PythonArcSelector(uint64 seed) : random_engine(seed) {}
 
-  size_t operator()(const Fst<PyFST> &fst, StateId s) const {
-    const auto n = fst.NumArcs(s) + (fst.Final(s) != Weight::Zero());
-    //vector<float> scores;  // the unweighted scores for the arcs
+  size_t operator()(const Fst<PyArc<S> > &fst, StateId s) const {
+    //const auto n = fst.NumArcs(s) + (fst.Final(s) != Weight::Zero());
+    vector<double> scores;  // the unweighted scores for the arcs
+    double sum = 0;
 
-    // TODO:
-    return static_cast<size_t>(
-        std::uniform_int_distribution<>(0, n - 1)(rand_));
+    ArcIterator<Fst<PyArc<S> > > iter(fst, s);
+    while(!iter.Done()) {
+      auto &v = iter.Value();
+      const FSTWeight<S> &w = v.weight;
+      if(w.isBuiltIn()) {
+        if(w.flags != FSTWeight<S>::isZero) {
+          throw fsterror("Unable to sample from fst that contains static but not zero weights");
+        }
+        scores.push_back(0);
+      } else {
+        py::object o = w.PythonObject();
+        py::object r = o.attr("_sampling_weight")();
+        double f = r.cast<double>();
+        sum += f;
+        scores.push_back(f);
+      }
+      iter.Next();
+    }
+
+    // hopefully final is the last state, otherwise there is going to be some off by one error
+    const FSTWeight<S> &w = fst.Final(s);
+    if(w != Weight::Zero()) {
+      if(w.isBuiltIn()) {
+        throw fsterror("Unable to sample from fst that contains static but not zero weights");
+      }
+      py::object o = w.PythonObject();
+      py::object r = o.attr("_sampling_weight")();
+      double f = r.cast<double>();
+      sum += f;
+      scores.push_back(f);
+    }
+
+    uniform_real_distribution<double> uniform(0.0, 1.0);
+    double U = sum * uniform(random_engine);
+    for(size_t i = 0; i < scores.size(); i++) {
+      U -= scores[i];
+      if(U <= 0) { return i; }
+    }
+    return scores.size() - 1; // always return something in the case that we got all the way to the end
   }
 
  private:
-  mutable std::mt19937_64 rand_;
+  //mutable std::mt19937_64 rand_;
+  mutable default_random_engine random_engine;
 
 };
-*/
+
 
 template<typename Arc>
 class IOLabelCompare {
@@ -664,12 +693,31 @@ void define_class(pybind11::module &m, const char *name) {
         return ret;
       })
 
-    .def("_RandomPath", [](const PyFST<S> &a) {
-        // TODO: have something that is going to call back into the
-        // python process and use that to generate the weights that are along the path
+    .def("_ShortestPath", [](const PyFST<S> &a, int count) {
+        ErrorCatcher e;
+        PyFST<S> *ret = new PyFST<S>();
+        ShortestPath(a, ret, count);
+        return ret;
+      })
 
-        assert(false); // TODO:
-        return false;
+    .def("_RmEpsilon", [](const PyFST<S> &a) {
+        ErrorCatcher e;
+        PyFST<S> *ret = a.Copy();
+        RmEpsilon(ret);
+        return ret;
+      })
+
+    .def("_RandomPath", [](const PyFST<S> &a, int count) {
+        PyFST<S> *ret = new PyFST<S>();
+
+        PythonArcSelector<S>  selector;
+        // unsure how having the count as the weight will work?  The output semiring is potentially the same as this one??
+        // but we could get the counts back??
+        // maybe we should just wrap the FST with the value class instead of having the customized seminring?
+        RandGenOptions<PythonArcSelector<S> > ops(selector, std::numeric_limits<int32>::max(), count, true);
+        RandGen(a, ret, ops);
+
+        return ret;
       })
 
     .def("_ArcList", [](const PyFST<S> &a, int64 state) {

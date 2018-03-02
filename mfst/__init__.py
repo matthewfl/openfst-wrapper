@@ -508,13 +508,48 @@ class FST(object):
         """
         return self._wrap_fst(self._fst._Minimize(delta))
 
-    def random_path(self, arc_selector=None):
+    def shortest_path(self, count=1):
         """
+        This operation produces an FST containing the n -shortest paths in the input
+        FST. The n -shortest paths are the n -lowest weight paths w.r.t. the
+        natural semiring order. The single path that can be read from the ith of
+        at most n transitions leaving the initial state of the resulting FST is
+        the ith shortest path.
 
+        The weights need to be right distributive and have the path property. They also
+        need to be left distributive as well for n -shortest with n > 1 (valid for
+        TropicalWeight).
+
+        http://www.openfst.org/twiki/bin/view/FST/ShortestPathDoc
+        """
+        return self._wrap_fst(self._fst._ShortestPath(count))
+
+    def random_path(self, count=1):
+        """
+        This operation randomly generates a set of successful paths in the input
+        FST. The operation relies on an ArcSelector object for randomly
+        selecting an outgoing transition at a given state in the input FST. The
+        default arc selector, UniformArcSelector, randomly selects a transition
+        using the uniform distribution. LogProbArcSelector randomly selects a
+        transition w.r.t. the weights treated as negative log probabilities
+        after normalizing for the total weight leaving the state. In all cases,
+        finality is treated as a transition to a super-final state.
+
+        This uses Weight._sampling_weight to get an unormalized weight for each path
 
         http://www.openfst.org/twiki/bin/view/FST/RandGenDoc
         """
-        pass
+        return self._wrap_fst(self._fst._RandomPath(count))
+
+    def remove_epsilon(self):
+        """
+        This operation removes epsilon-transitions (when both the input and output
+        label are an epsilon) from a transducer. The result will be an
+        equivalent FST that has no such epsilon transitions.
+
+        http://www.openfst.org/twiki/bin/view/FST/RmEpsilonDoc
+        """
+        return self._wrap_fst(self._fst._RmEpsilon())
 
     def __str__(self):
         if self.num_states < 10:
@@ -604,13 +639,15 @@ class FST(object):
 
         # here we are actually going to read the states from the FST and generate nodes for them
         # in the output source code
+        zero = self._make_weight('__FST_ZERO__')
 
         for sid in range(self.num_states):
             finalW = ''
             ww = self._fst._FinalWeight(sid)
-            if not (isinstance(ww, str) and ww != '__FST_ZERO__'):  # look at at the raw returned value to see if it is zero (unset)
+            if '__FST_ZERO__' != ww:  # look at at the raw returned value to see if it is zero (unset)
                 ww = self._make_weight(ww)
-                finalW = f'\n({ww})'
+                if zero != ww:
+                    finalW = f'\n({ww})'
             label = f'{sid}{finalW}'
 
             ret += f'g.setNode("state_{sid}", {{ label: {json.dumps(label)} , shape: "circle" }});\n'
