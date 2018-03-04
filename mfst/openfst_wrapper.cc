@@ -73,7 +73,7 @@ public:
     // reset
     cerr.rdbuf(backup);
     string e = buff.str();
-    if(!e.empty()) {
+    if(!e.empty() && std::current_exception() == nullptr) {
       PyErr_SetString(PyExc_RuntimeError, e.c_str());
       //throw fsterror(e);
       throw py::error_already_set();
@@ -538,6 +538,7 @@ public:
 
  private:
   //mutable std::mt19937_64 rand_;
+  // TODO: this should just be a global that can be seeded at some point?
   mutable default_random_engine random_engine;
 
 };
@@ -707,10 +708,10 @@ void define_class(pybind11::module &m, const char *name) {
         return ret;
       })
 
-    .def("_RandomPath", [](const PyFST<S> &a, int count) {
+    .def("_RandomPath", [](const PyFST<S> &a, int count, uint64 rand_seed) {
         PyFST<S> *ret = new PyFST<S>();
 
-        PythonArcSelector<S>  selector;
+        PythonArcSelector<S>  selector(rand_seed)
         // unsure how having the count as the weight will work?  The output semiring is potentially the same as this one??
         // but we could get the counts back??
         // maybe we should just wrap the FST with the value class instead of having the customized seminring?
