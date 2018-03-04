@@ -284,7 +284,7 @@ public:
 
 
 template<uint64 S>
-inline FSTWeight<S> Plus(const FSTWeight<S> &w1, const FSTWeight<S> &w2) {
+FSTWeight<S> Plus(const FSTWeight<S> &w1, const FSTWeight<S> &w2) {
   // these identity elements have to be handled specially
   // as they are the same for all semirings that are defined in python and thus contain no value
   if(w1.flags == FSTWeight<S>::isZero) {
@@ -311,7 +311,7 @@ inline FSTWeight<S> Plus(const FSTWeight<S> &w1, const FSTWeight<S> &w2) {
 }
 
 template<uint64 S>
-inline FSTWeight<S> Times(const FSTWeight<S> &w1, const FSTWeight<S> &w2) {
+FSTWeight<S> Times(const FSTWeight<S> &w1, const FSTWeight<S> &w2) {
   if(w1.flags == FSTWeight<S>::isOne) {
     return w2;
   }
@@ -335,7 +335,7 @@ inline FSTWeight<S> Times(const FSTWeight<S> &w1, const FSTWeight<S> &w2) {
 }
 
 template<uint64 S>
-inline FSTWeight<S> Divide(const FSTWeight<S> &w1, const FSTWeight<S> &w2) {
+FSTWeight<S> Divide(const FSTWeight<S> &w1, const FSTWeight<S> &w2) {
   if(w2.flags == FSTWeight<S>::isOne) {
     return w1;
   }
@@ -365,7 +365,7 @@ inline FSTWeight<S> Divide(const FSTWeight<S> &w1, const FSTWeight<S> &w2, const
 }
 
 template<uint64 S>
-inline FSTWeight<S> Power(const FSTWeight<S> &w1, int n) {
+FSTWeight<S> Power(const FSTWeight<S> &w1, int n) {
   if(w1.isBuiltIn()) {
     if(w1.flags == FSTWeight<S>::isCount)
       throw fsterror("Unable to construct power of static count");
@@ -376,7 +376,7 @@ inline FSTWeight<S> Power(const FSTWeight<S> &w1, int n) {
 }
 
 template<uint64 S>
-inline bool operator==(FSTWeight<S> const &w1, FSTWeight<S> const &w2) {
+bool operator==(FSTWeight<S> const &w1, FSTWeight<S> const &w2) {
   py::object o1 = w1.impl;
   py::object o2 = w2.impl;
   if(w1.isBuiltIn() && !w2.isBuiltIn()) {
@@ -400,7 +400,7 @@ inline bool operator!=(FSTWeight<S> const &w1, FSTWeight<S> const &w2) {
 }
 
 template<uint64 S>
-inline bool ApproxEqual(FSTWeight<S> const &w1, FSTWeight<S> const &w2, const float &delta) {
+bool ApproxEqual(FSTWeight<S> const &w1, FSTWeight<S> const &w2, const float &delta) {
   py::object o1 = w1.impl;
   py::object o2 = w2.impl;
   if(w1.isBuiltIn() && !w2.isBuiltIn()) {
@@ -437,10 +437,6 @@ using PyArc = ArcTpl<FSTWeight<S> >;
 template<uint64 S>
 using PyFST = VectorFst<PyArc<S>, VectorState<PyArc<S> > >;
 
-// PyFST<S>* create_fst() {
-//   return new PyFST();
-// }
-
 template<uint64 S>
 void add_arc(PyFST<S> &self, int64 from, int64 to,
              int64 input_label, int64 output_label, py::object weight) {
@@ -453,9 +449,7 @@ void add_arc(PyFST<S> &self, int64 from, int64 to,
 
   FSTWeight<S> w1(weight);
   PyArc<S> a(input_label, output_label, w1, to);
-  //cout << "before add\n";
   self.AddArc(from, a);
-  //cout << "after add\n";
 }
 
 template<uint64 S>
@@ -508,6 +502,9 @@ public:
         py::object o = w.PythonObject();
         py::object r = o.attr("_sampling_weight")();
         double f = r.cast<double>();
+        if(f < 0) {
+          throw fsterror("_sampling_weight on edge must be >= 0");
+        }
         sum += f;
         scores.push_back(f);
       }
@@ -570,37 +567,37 @@ void define_class(pybind11::module &m, const char *name) {
   py::class_<PyFST<S> >(m, name)
     .def(py::init<>())
 
-#define d(name) .def("_" #name, & PyFST<S> :: name)
-    .def("_AddArc", &add_arc<S>) // keep the weight alive when added
+#define d(name) .def(#name, & PyFST<S> :: name)
+    .def("AddArc", &add_arc<S>) // keep the weight alive when added
     d(AddState)
     // there are more than one method with this name but different type signatures
-    .def("_DeleteArcs", [](PyFST<S> *m, int64 v) { if(m) m->DeleteArcs(v); })
+    .def("DeleteArcs", [](PyFST<S> *m, int64 v) { if(m) m->DeleteArcs(v); })
 
-    .def("_DeleteStates", [](PyFST<S> *m) { if(m) m->DeleteStates(); })
+    .def("DeleteStates", [](PyFST<S> *m) { if(m) m->DeleteStates(); })
 
     d(NumStates)
     d(ReserveArcs)
     d(ReserveStates)
 
-    .def("_SetFinal", &set_final<S>)
+    .def("SetFinal", &set_final<S>)
     d(SetStart)
 
     d(NumArcs)
     d(Start)
 
-    .def("_FinalWeight", &final_weight<S>)
+    .def("FinalWeight", &final_weight<S>)
 #undef d
 
 
 
     // compare two FST methods
-    .def("_Isomorphic", [](const PyFST<S> &a, const PyFST<S> &b, float delta) {
+    .def("Isomorphic", [](const PyFST<S> &a, const PyFST<S> &b, float delta) {
         ErrorCatcher e;
         return Isomorphic(a, b, delta);
       })
 
     // methods that will generate a new FST or
-    .def("_Concat", [](const PyFST<S> &a, PyFST<S> &b) {
+    .def("Concat", [](const PyFST<S> &a, PyFST<S> &b) {
         ErrorCatcher e;
         PyFST<S> *ret = b.Copy();
         Concat(a, ret);
@@ -608,7 +605,7 @@ void define_class(pybind11::module &m, const char *name) {
       })
 
 
-    .def("_Compose", [](const PyFST<S> &a, const PyFST<S> &b) {
+    .def("Compose", [](const PyFST<S> &a, const PyFST<S> &b) {
         ErrorCatcher e;
         PyFST<S> *ret = new PyFST<S>();
         // we have to sort the arcs such that this can be compared between objects
@@ -621,7 +618,7 @@ void define_class(pybind11::module &m, const char *name) {
         return ret;
       })
 
-    .def("_Determinize", [](const PyFST<S> &a, float delta, py::object weight) {
+    .def("Determinize", [](const PyFST<S> &a, float delta, py::object weight) {
         ErrorCatcher e;
         FSTWeight<S> weight_threshold(weight);
 
@@ -632,7 +629,7 @@ void define_class(pybind11::module &m, const char *name) {
         return ret;
       })
 
-    .def("_Project", [](const PyFST<S> &a, int type) {
+    .def("Project", [](const PyFST<S> &a, int type) {
         ErrorCatcher e;
         PyFST<S> *ret = new PyFST<S>();
 
@@ -641,21 +638,21 @@ void define_class(pybind11::module &m, const char *name) {
         return ret;
       })
 
-    .def("_Difference", [](const PyFST<S> &a, const PyFST<S> &b) {
+    .def("Difference", [](const PyFST<S> &a, const PyFST<S> &b) {
         ErrorCatcher e;
         PyFST<S> *ret = new PyFST<S>();
         Difference(a, b, ret);
         return ret;
       })
 
-    .def("_Invert", [](const PyFST<S> &a) {
+    .def("Invert", [](const PyFST<S> &a) {
         ErrorCatcher e;
         PyFST<S> *ret = a.Copy();
         Invert(ret);
         return ret;
       })
 
-    .def("_Prune", [](const PyFST<S> &a, py::object weight) {
+    .def("Prune", [](const PyFST<S> &a, py::object weight) {
         ErrorCatcher e;
         FSTWeight<S> weight_threshold(weight);
         PyFST<S> *ret = new PyFST<S>();
@@ -663,27 +660,27 @@ void define_class(pybind11::module &m, const char *name) {
         return ret;
       })
 
-    .def("_Intersect", [](const PyFST<S> &a, const PyFST<S> &b) {
+    .def("Intersect", [](const PyFST<S> &a, const PyFST<S> &b) {
         PyFST<S> *ret = new PyFST<S>();
         Intersect(a, b, ret);
         return ret;
       })
 
-    .def("_Union", [](const PyFST<S> &a, const PyFST<S> &b) {
+    .def("Union", [](const PyFST<S> &a, const PyFST<S> &b) {
         ErrorCatcher e;
         PyFST<S> *ret = a.Copy();
         Union(ret, b);
         return ret;
       })
 
-    .def("_Minimize", [](const PyFST<S> &a, double delta) {
+    .def("Minimize", [](const PyFST<S> &a, double delta) {
         ErrorCatcher e;
         PyFST<S> *ret = a.Copy();
         Minimize(ret, static_cast<PyFST<S>* >(nullptr), delta);
         return ret;
       })
 
-    .def("_Push", [](const PyFST<S> &a, int mode) {
+    .def("Push", [](const PyFST<S> &a, int mode) {
         ErrorCatcher e;
         PyFST<S> *ret = new PyFST<S>();
         if(mode == 0) {
@@ -694,24 +691,24 @@ void define_class(pybind11::module &m, const char *name) {
         return ret;
       })
 
-    .def("_ShortestPath", [](const PyFST<S> &a, int count) {
+    .def("ShortestPath", [](const PyFST<S> &a, int count) {
         ErrorCatcher e;
         PyFST<S> *ret = new PyFST<S>();
         ShortestPath(a, ret, count);
         return ret;
       })
 
-    .def("_RmEpsilon", [](const PyFST<S> &a) {
+    .def("RmEpsilon", [](const PyFST<S> &a) {
         ErrorCatcher e;
         PyFST<S> *ret = a.Copy();
         RmEpsilon(ret);
         return ret;
       })
 
-    .def("_RandomPath", [](const PyFST<S> &a, int count, uint64 rand_seed) {
+    .def("RandomPath", [](const PyFST<S> &a, int count, uint64 rand_seed) {
         PyFST<S> *ret = new PyFST<S>();
 
-        PythonArcSelector<S>  selector(rand_seed)
+        PythonArcSelector<S>  selector(rand_seed);
         // unsure how having the count as the weight will work?  The output semiring is potentially the same as this one??
         // but we could get the counts back??
         // maybe we should just wrap the FST with the value class instead of having the customized seminring?
@@ -721,7 +718,7 @@ void define_class(pybind11::module &m, const char *name) {
         return ret;
       })
 
-    .def("_ArcList", [](const PyFST<S> &a, int64 state) {
+    .def("ArcList", [](const PyFST<S> &a, int64 state) {
         // input label, output label, to state, weight
         ErrorCatcher e;
         vector<py::tuple> ret;
@@ -747,7 +744,7 @@ void define_class(pybind11::module &m, const char *name) {
         return ret;
       })
 
-    .def("_toString", [](const PyFST<S> &a) {
+    .def("ToString", [](const PyFST<S> &a) {
         ErrorCatcher e;
         ostringstream out;
         fst::script::PrintFst(a, out);

@@ -5,7 +5,7 @@ from random import randint as _randint
 ArcType = _namedtuple('Arc', ['ilabel', 'olabel', 'nextstate', 'weight'])
 
 
-class WeightBase(object):
+class AbstractSemiring(object):
 
     @classmethod
     def zero(cls):
@@ -94,11 +94,11 @@ class WeightBase(object):
         return self.__div__(other)
 
 
-class ValueWeight(WeightBase):
+class ValueSemiring(AbstractSemiring):
 
     def __init__(self, value=0):
         super().__init__()
-        self._value = value  # the value
+        self._value = value
 
     @classmethod
     def _create(cls, v):
@@ -150,7 +150,7 @@ class ValueWeight(WeightBase):
         return hash(self._value)
 
     def __eq__(self, other):
-        return isinstance(other, ValueWeight) and self._value == other._value
+        return isinstance(other, ValueSemiring) and self._value == other._value
 
     def __float__(self):
         return float(self._value)
@@ -167,18 +167,15 @@ class FST(object):
     Wraps a mutable FST class
     """
 
-    def __init__(self, fst_type='base', weight_class=None, _fst=None, acceptor=False, _character_fst=False):
-        if _fst:
-            self._fst = _fst
-        else:
-            if fst_type == 'acceptor':
-                acceptor = True
-                fst_type = 'base'
+    def __init__(self, fst='base', semiring_class=None, acceptor=False, _character_fst=False):
+        if isinstance(fst, str):
             self._fst = {
                 # these classes are defined in c++ to wrap openfst
                 'base': _backend.FSTBase,
                 'path': _backend.FSTPath,
-            }[fst_type]()
+            }[fst]()
+        else:
+            self._fst = fst
 
         # if we are an acceptor machine, then we want the input and output labels to be the same
         # setting this to true will automattically copy the input label to the output label in add_arc
@@ -188,38 +185,74 @@ class FST(object):
         # used, then this will get set to true inside of add_arc
         self._character_fst = _character_fst
 
-        if not weight_class:
-            self._weight_class = ValueWeight
+        if not semiring_class:
+            self._semiring_class = ValueSemiring
         else:
-            assert issubclass(weight_class, WeightBase)
-            weight_class.zero()  # check that we can construct zero and one
-            weight_class.one()
-            self._weight_class = weight_class
+            # quick sanity check that this implements the semiring class
+            assert issubclass(semiring_class, AbstractSemiring)
+            zero = semiring_class.zero()
+            one = semiring_class.one()
+            assert isinstance(zero, semiring_class)
+            assert isinstance(one, semiring_class)
+            assert isinstance(zero + one, semiring_class)
+            assert isinstance(zero * one, semiring_class)
+
+            self._semiring_class = semiring_class
 
     def _make_weight(self, w):
-        if isinstance(w, self._weight_class):
+        if isinstance(w, self._semiring_class):
             return w
-        assert not isinstance(w, WeightBase), "Can not mix different types of weights in a FST"
+        assert not isinstance(w, AbstractSemiring), "Can not mix different types of weights in a FST"
         if isinstance(w, str):
             # this can be returned by the C++ binding in the case that there is an invalid state
             if w == '__FST_INVALID__':
                 return None
             elif w == '__FST_ONE__':
-                return self._weight_class.one()
+                return self._semiring_class.one()
             elif w == '__FST_ZERO__':
-                return self._weight_class.zero()
-        return self._weight_class(w)
+                return self._semiring_class.zero()
+        return self._semiring_class(w)
 
-    def _wrap_fst(self, fst):
+    def _check_same_fst(self, other):
+        """Check that the other fst is the same type as us, otherwise we will run into problems"""
+        assert isinstance(other, FST)
+        assert type(self._fst) is type(other._fst), "Can not mix FSTs with different properties"
+        assert self._semiring_class is other._semiring_class, "Can not mix FSTs with different semirings"
+
+    def constructor(self, _fst=None):
+        """Return a new instance of the FST using the same parameters"""
+        if _fst:
+            assert type(_fst) is type(self._fst), "type of fst differs from our own type"
+        else:
+            _fst = type(self._fst)()
         return type(self)(
-            weight_class=self._weight_class,
-            _fst=fst,
+            fst=_fst,
+            semiring_class=self._semiring_class,
             acceptor=self._acceptor,
             _character_fst=self._character_fst
         )
 
+    @property
+    def semiring_one(self):
+        """Return the semiring's one element"""
+        return self._semiring_class.one()
+
+    @property
+    def semiring_zero(self):
+        """Return the semiring's zero element"""
+        return self._semiring_class.zero()
+
+    @property
+    def semiring(self):
+        """Return the semiring associated with this FST"""
+        return self._semiring_class
+
     def create_from_string(self, string):
-        ret = FST(weight_class=self._weight_class, _fst=type(self._fst)(), acceptor=self._acceptor, _character_fst=self._character_fst)
+        """
+        Creates a FST which converts the empty string (epsilon) to string.
+        String can be a normal python string or an iterable (list or tuple) of integers
+        """
+        ret = self.constructor()
         last = ret.add_state()
         ret.start_state = last
         for s in string:  # string can be any iterable object, eg (a normal string or a tuple of ints)
@@ -267,20 +300,20 @@ class FST(object):
         """
         Return the number of states currently set on the fst
         """
-        return self._fst._NumStates()
+        return self._fst.NumStates()
 
     def num_arcs(self, state):
         """
         Return the number of arcs in the fst
         """
-        return self._fst._NumArcs()
+        return self._fst.NumArcs()
 
     @property
     def start_state(self):
         """
         Return the state id of the starting state
         """
-        return self._fst._Start()
+        return self._fst.Start()
 
     @start_state.setter
     def start_state(self, state):
@@ -288,7 +321,7 @@ class FST(object):
         Mark a state as the start state
         """
         assert (state >= 0 and state < self.num_states), "Invalid state id"
-        return self._fst._SetStart(state)
+        return self._fst.SetStart(state)
 
     def set_start_state(self, state):
         self.start_state = state
@@ -298,7 +331,7 @@ class FST(object):
         Add a new state to the FST
         Return this state's id
         """
-        return self._fst._AddState()
+        return self._fst.AddState()
 
     def add_arc(self, from_state, to_state,
                 weight='__FST_ONE__', input_label=0, output_label=0):
@@ -320,42 +353,42 @@ class FST(object):
         if self._acceptor:
             # acceptors are machines with the same input and output label
             output_label = input_label
-        return self._fst._AddArc(from_state, to_state, input_label, output_label,
-                                 self._make_weight(weight))
+        return self._fst.AddArc(from_state, to_state, input_label, output_label,
+                                self._make_weight(weight))
 
     def delete_arcs(self, state):
         """
         Delete all arcs coming out of state
         """
         assert (state >= 0 and state < self.num_states), "Invalid state id"
-        return self._fst._DeleteArcs(state)
+        return self._fst.DeleteArcs(state)
 
     def delete_states(self):
         """
         Delete all states in the FST
         """
-        return self._fst._DeleteStates()
+        return self._fst.DeleteStates()
 
     def set_final_weight(self, state, weight='__FST_ONE__'):
         """
         Set the weight that this state transisions to the final state
         """
         assert (state >= 0 and state < self.num_states), "Invalid state id"
-        return self._fst._SetFinal(state, self._make_weight(weight))
+        return self._fst.SetFinal(state, self._make_weight(weight))
 
     def get_final_weight(self, state):
         """
         Get the weight of transistioning to the final state
         """
         assert (state >= 0 and state < self.num_states), "Invalid state id"
-        return self._make_weight(self._fst._FinalWeight(state))
+        return self._make_weight(self._fst.FinalWeight(state))
 
     def get_arcs(self, state):
         """
         Return the arcs coming out of some state
         """
         assert (state >= 0 and state < self.num_states), "Invalid state id"
-        for ilabel, olabel, nextstate, weight in self._fst._ArcList(state):
+        for ilabel, olabel, nextstate, weight in self._fst.ArcList(state):
             yield ArcType(ilabel, olabel, nextstate, self._make_weight(weight))
 
     def isomorphic(self, other, delta=1.0/1024):
@@ -369,10 +402,11 @@ class FST(object):
 
         http://www.openfst.org/twiki/bin/view/FST/IsomorphicDoc
 
-        uses WeightBase._approx_eq to compare wieghts.
+        uses AbstractSemiring._approx_eq to compare wieghts.
         delta: 32 bit floating point number that is passed to _approx_eq
         """
-        return self._fst._Isomorphic(other._fst, delta)
+        self._check_same_fst(other)
+        return self._fst.Isomorphic(other._fst, delta)
 
     # methods for changing the fst given anther fst
     def concat(self, other):
@@ -384,8 +418,8 @@ class FST(object):
 
         http://www.openfst.org/twiki/bin/view/FST/ConcatDoc
         """
-        assert isinstance(other, FST)
-        return self._wrap_fst(self._fst._Concat(other._fst))
+        self._check_same_fst(other)
+        return self.constructor(self._fst.Concat(other._fst))
 
     def compose(self, other):
         """
@@ -395,8 +429,8 @@ class FST(object):
 
         http://www.openfst.org/twiki/bin/view/FST/ComposeDoc
         """
-        assert isinstance(other, FST)
-        return self._wrap_fst(self._fst._Compose(other._fst))
+        self._check_same_fst(other)
+        return self.constructor(self._fst.Compose(other._fst))
 
     def determinize(self, delta=1.0/1024, weight_threshold=None):
         """
@@ -411,9 +445,9 @@ class FST(object):
         weight_threshold: Pruning weight threshold.
         """
         if weight_threshold is None:
-            weight_threshold = self._weight_class()
+            weight_threshold = self._semiring_class()
 
-        return self._wrap_fst(self._fst._Determinize(delta, self._make_weight(weight_threshold)))
+        return self.constructor(self._fst.Determinize(delta, self._make_weight(weight_threshold)))
 
     def project(self, type='input'):
         """
@@ -422,14 +456,13 @@ class FST(object):
 
         http://www.openfst.org/twiki/bin/view/FST/ProjectDoc
         """
-
         if type == 'output':
             t = 0
         elif type == 'input':
             t = 1
         else:
             raise RuntimeError("unknown project type " + type)
-        return self._wrap_fst(self._fst._Project(t))
+        return self.constructor(self._fst.Project(t))
 
     def difference(self, other):
         """
@@ -439,8 +472,8 @@ class FST(object):
 
         http://www.openfst.org/twiki/bin/view/FST/DifferenceDoc
         """
-        assert isinstance(other, FST)
-        assert self._wrap_fst(self._fst._Difference(other))
+        self._check_same_fst(other)
+        assert self.constructor(self._fst.Difference(other._fst))
 
     def invert(self):
         """
@@ -449,7 +482,7 @@ class FST(object):
 
         http://www.openfst.org/twiki/bin/view/FST/InvertDoc
         """
-        return self._wrap_fst(self._fst._Invert())
+        return self.constructor(self._fst.Invert())
 
     def prune(self, weight):
         """
@@ -460,7 +493,7 @@ class FST(object):
 
         http://www.openfst.org/twiki/bin/view/FST/PruneDoc
         """
-        return self._wrap_fst(self._fst._Prune(self._make_weight(weight)))
+        return self.constructor(self._fst.Prune(self._make_weight(weight)))
 
     def union(self, other):
         """
@@ -470,7 +503,8 @@ class FST(object):
 
         http://www.openfst.org/twiki/bin/view/FST/UnionDoc
         """
-        return self._wrap_fst(self._fst._Union(other._fst))
+        self._check_same_fst(other)
+        return self.constructor(self._fst.Union(other._fst))
 
 
     def intersect(self, other):
@@ -481,7 +515,8 @@ class FST(object):
 
         http://www.openfst.org/twiki/bin/view/FST/IntersectDoc
         """
-        return self._wrap_fst(self._fst._Intersect(other._fst))
+        self._check_same_fst(other)
+        return self.constructor(self._fst.Intersect(other._fst))
 
     def push(self, towards='final'):
         """
@@ -497,7 +532,7 @@ class FST(object):
             t = 0
         else:
             raise RuntimeError("Unknown direction for weight pushing")
-        return self._wrap_fst(self._fst._Push(t))
+        return self.constructor(self._fst.Push(t))
 
     def minimize(self, delta=1./1024):
         """
@@ -523,7 +558,7 @@ class FST(object):
 
         http://www.openfst.org/twiki/bin/view/FST/MinimizeDoc
         """
-        return self._wrap_fst(self._fst._Minimize(delta))
+        return self.constructor(self._fst.Minimize(delta))
 
     def shortest_path(self, count=1):
         """
@@ -539,7 +574,7 @@ class FST(object):
 
         http://www.openfst.org/twiki/bin/view/FST/ShortestPathDoc
         """
-        return self._wrap_fst(self._fst._ShortestPath(count))
+        return self.constructor(self._fst.ShortestPath(count))
 
     def random_path(self, count=1):
         """
@@ -558,7 +593,7 @@ class FST(object):
         """
         # use python random, so if it is seeded then it will be consistent across uses
         s = _randint(0, 2 ** 63)
-        return self._wrap_fst(self._fst._RandomPath(count, s))
+        return self.constructor(self._fst.RandomPath(count, s))
 
     def remove_epsilon(self):
         """
@@ -568,7 +603,7 @@ class FST(object):
 
         http://www.openfst.org/twiki/bin/view/FST/RmEpsilonDoc
         """
-        return self._wrap_fst(self._fst._RmEpsilon())
+        return self.constructor(self._fst.RmEpsilon())
 
     def __str__(self):
         if self.num_states < 10:
@@ -578,7 +613,7 @@ class FST(object):
             return 'FST(num_states={})'.format(self.num_states)
 
     def full_str(self):
-        return 'FST {\n' + self._fst._toString() + '\n}'
+        return 'FST {\n' + self._fst.ToString() + '\n}'
 
     def __repr__(self):
         return str(self)
@@ -662,7 +697,7 @@ class FST(object):
 
         for sid in range(self.num_states):
             finalW = ''
-            ww = self._fst._FinalWeight(sid)
+            ww = self._fst.FinalWeight(sid)
             if '__FST_ZERO__' != ww:  # look at at the raw returned value to see if it is zero (unset)
                 ww = self._make_weight(ww)
                 if zero != ww:

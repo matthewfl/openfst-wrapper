@@ -4,7 +4,7 @@ import mfst
 
 num_weights = 0
 
-class MyWeight(mfst.WeightBase):
+class MyWeight(mfst.AbstractSemiring):
 
     def __init__(self, v=0):
         global num_weights
@@ -118,7 +118,7 @@ g = f1.union(f2)
 print(g.full_str())
 g._repr_html_()
 
-fst = mfst.FST('acceptor')
+fst = mfst.FST(acceptor=True)
 f1 = fst.create_from_string('hello')
 f2 = fst.create_from_string('world')
 g = f1.intersect(f2)
