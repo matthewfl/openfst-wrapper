@@ -1,3 +1,9 @@
+# Written by Matthew Francis-Landau (2018)
+#
+# Wrapper for OpenFST that supports defining custom semirings in python
+# and drawing FSTs in ipython notebooks
+
+
 import openfst_wrapper_backend as _backend
 from collections import namedtuple as _namedtuple
 from random import randint as _randint
@@ -307,6 +313,13 @@ class FST(object):
         """
         return self._fst.NumStates()
 
+    @property
+    def states(self):
+        """
+        An iterator over state ids inside of the FST.
+        """
+        yield from range(self.num_states)
+
     def num_arcs(self, state):
         """
         Return the number of arcs in the fst
@@ -531,7 +544,6 @@ class FST(object):
         and/or the labels towards the initial state or toward the final states.
 
         http://www.openfst.org/twiki/bin/view/FST/PushDoc
-
         """
         if towards == 'final':
             t = 1
@@ -590,7 +602,14 @@ class FST(object):
         states (when reverse is true). The shortest distance from p to q is the
         oplus-sum of the weights of all the paths between p and q.
         """
-        return [self._make_weight(w) for w in self._fst.ShorestDistance(reverse)]
+        return [self._make_weight(w) for w in self._fst.ShortestDistance(reverse)]
+
+    def topo_sort(self):
+        """
+        This operation topologically sorts its input if acyclic.
+        When sorted, all transitions are from lower to higher state IDs.
+        """
+        return self.constructor(self._fst.TopSort())
 
     def random_path(self, count=1):
         """

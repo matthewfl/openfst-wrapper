@@ -1,3 +1,10 @@
+/**
+   Written by Matthew Francis-Landau (2018)
+
+   Wrapper for OpenFST that supports defining custom semirings in python
+   and drawing FSTs in ipython notebooks
+*/
+
 #include <memory>
 #include <string>
 #include <sstream>
@@ -41,6 +48,7 @@
 #include <fst/rmepsilon.h>
 #include <fst/randgen.h>
 #include <fst/shortest-distance.h>
+#include <fst/topsort.h>
 
 #include <fst/script/print.h>
 
@@ -711,6 +719,15 @@ void define_class(pybind11::module &m, const char *name) {
         for(auto &w : distances) {
           ret.push_back(w.PythonObject());
         }
+
+        return ret;
+      })
+
+    .def("TopSort", [](const PyFST<S> &a) {
+        ErrorCatcher e;
+        unique_ptr<PyFST<S> > ret(a.Copy());
+
+        TopSort(ret.get());
 
         return ret;
       })
