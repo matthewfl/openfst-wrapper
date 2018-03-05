@@ -52,7 +52,7 @@ class AbstractSemiring(object):
         """
         raise NotImplementedError()
 
-    def _quantize(self):
+    def _quantize(self, delta=.5):
         """
         Return a new instance that is bucketed
         """
@@ -98,7 +98,12 @@ class ValueSemiring(AbstractSemiring):
 
     def __init__(self, value=0):
         super().__init__()
-        self._value = value
+        # the value should be immutable, so access via property
+        self.__value = value
+
+    @property
+    def value(self):
+        return self.__value
 
     @classmethod
     def _create(cls, v):
@@ -114,23 +119,23 @@ class ValueSemiring(AbstractSemiring):
 
     def __add__(self, other):
         assert type(other) is type(self)
-        return self._create(self._value + other._value)
+        return self._create(self.value + other.value)
 
     def __mul__(self, other):
         assert type(other) is type(self)
-        return self._create(self._value * other._value)
+        return self._create(self.value * other.value)
 
     def __div__(self, other):
         assert type(other) is type(self)
-        return self._create(self._value / other._value)
+        return self._create(self.value / other.value)
 
     def __pow__(self, n):
-        return self._create(self._value ** n)
+        return self._create(self.value ** n)
 
     def _member(self):
         # check that this is a member of the semiring
         # this is just a nan check atm
-        return self._value == self._value
+        return self.value == self.value
 
     def _quantize(self, delta=.5):
         # quantize the weight into buckets
@@ -141,25 +146,25 @@ class ValueSemiring(AbstractSemiring):
         return 1
 
     def _approx_eq(self, other, delta):
-        return abs(self._value - other._value) < delta
+        return abs(self.value - other.value) < delta
 
     def __str__(self):
-        return str(self._value)
+        return str(self.value)
 
     def __hash__(self):
-        return hash(self._value)
+        return hash(self.value)
 
     def __eq__(self, other):
-        return isinstance(other, ValueSemiring) and self._value == other._value
+        return isinstance(other, ValueSemiring) and self.value == other.value
 
     def __float__(self):
-        return float(self._value)
+        return float(self.value)
 
     def __int__(self):
-        return int(self._value)
+        return int(self.value)
 
     def __repr__(self):
-        return f'{type(self).__name__}({self._value})'
+        return f'{type(self).__name__}({self.value})'
 
 
 class FST(object):
@@ -306,7 +311,7 @@ class FST(object):
         """
         Return the number of arcs in the fst
         """
-        return self._fst.NumArcs()
+        return self._fst.NumArcs(state)
 
     @property
     def start_state(self):
@@ -388,8 +393,10 @@ class FST(object):
         Return the arcs coming out of some state
         """
         assert (state >= 0 and state < self.num_states), "Invalid state id"
-        for ilabel, olabel, nextstate, weight in self._fst.ArcList(state):
-            yield ArcType(ilabel, olabel, nextstate, self._make_weight(weight))
+        return [
+            ArcType(ilabel, olabel, nextstate, self._make_weight(weight))
+            for ilabel, olabel, nextstate, weight in self._fst.ArcList(state)
+        ]
 
     def isomorphic(self, other, delta=1.0/1024):
         """
@@ -576,6 +583,15 @@ class FST(object):
         """
         return self.constructor(self._fst.ShortestPath(count))
 
+    def shortest_distance(self, reverse=False):
+        """
+        This operation computes the shortest distance from the initial state to
+        every state (when reverse is false) or from every state to the final
+        states (when reverse is true). The shortest distance from p to q is the
+        oplus-sum of the weights of all the paths between p and q.
+        """
+        return [self._make_weight(w) for w in self._fst.ShorestDistance(reverse)]
+
     def random_path(self, count=1):
         """
         This operation randomly generates a set of successful paths in the input
@@ -587,7 +603,7 @@ class FST(object):
         after normalizing for the total weight leaving the state. In all cases,
         finality is treated as a transition to a super-final state.
 
-        This uses Weight._sampling_weight to get an unormalized weight for each path
+        This uses Weight._sampling_weight to get an unormalized weight for each arc
 
         http://www.openfst.org/twiki/bin/view/FST/RandGenDoc
         """
@@ -715,9 +731,16 @@ class FST(object):
             make_chr = str
 
         for sid in range(self.num_states):
+            to = set()
             for arc in self.get_arcs(sid):
                 if arc.nextstate == -1:
                     continue
+                # if there are multiple arcs between a state, just draw one
+                # otherwise the drawing system is going to have problems
+                if arc.nextstate in to:
+                    continue
+                to.add(arc.nextstate)
+
                 label = ''
                 if arc.ilabel == 0:
                     label += '\u03B5'  # epsilon

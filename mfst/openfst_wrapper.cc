@@ -40,6 +40,7 @@
 #include <fst/shortest-path.h>
 #include <fst/rmepsilon.h>
 #include <fst/randgen.h>
+#include <fst/shortest-distance.h>
 
 #include <fst/script/print.h>
 
@@ -562,6 +563,7 @@ void define_class(pybind11::module &m, const char *name) {
 
   // prevent fst from killing the process
   // we just need to set this somewhere before using openfst
+  // TODO: if an exception is thrown, then this will probably leak the object it was constructing
   FLAGS_fst_error_fatal = false;
 
   py::class_<PyFST<S> >(m, name)
@@ -581,6 +583,7 @@ void define_class(pybind11::module &m, const char *name) {
 
     .def("SetFinal", &set_final<S>)
     d(SetStart)
+
 
     d(NumArcs)
     d(Start)
@@ -607,13 +610,13 @@ void define_class(pybind11::module &m, const char *name) {
 
     .def("Compose", [](const PyFST<S> &a, const PyFST<S> &b) {
         ErrorCatcher e;
-        PyFST<S> *ret = new PyFST<S>();
+        unique_ptr<PyFST<S> > ret (new PyFST<S>());
         // we have to sort the arcs such that this can be compared between objects
         IOLabelCompare<PyArc<S> > comp;
         ArcSortFst<PyArc<S>, IOLabelCompare<PyArc<S> > > as(a, comp);
         ArcSortFst<PyArc<S>, IOLabelCompare<PyArc<S> > > bs(b, comp);
 
-        Compose(as, bs, ret);
+        Compose(as, bs, ret.get());
         //Minimze(ret); // TODO: expose this
         return ret;
       })
@@ -622,98 +625,113 @@ void define_class(pybind11::module &m, const char *name) {
         ErrorCatcher e;
         FSTWeight<S> weight_threshold(weight);
 
-        PyFST<S> *ret = new PyFST<S>();
+        unique_ptr<PyFST<S> > ret(new PyFST<S>());
 
         DeterminizeOptions<PyArc<S> > ops(delta, weight_threshold);
-        Determinize(a, ret, ops);
+        Determinize(a, ret.get(), ops);
         return ret;
       })
 
     .def("Project", [](const PyFST<S> &a, int type) {
         ErrorCatcher e;
-        PyFST<S> *ret = new PyFST<S>();
+        unique_ptr<PyFST<S> > ret(new PyFST<S>());
 
         ProjectType typ = type ? PROJECT_INPUT : PROJECT_OUTPUT;
-        Project(a, ret, typ);
+        Project(a, ret.get(), typ);
         return ret;
       })
 
     .def("Difference", [](const PyFST<S> &a, const PyFST<S> &b) {
         ErrorCatcher e;
-        PyFST<S> *ret = new PyFST<S>();
-        Difference(a, b, ret);
+        unique_ptr<PyFST<S> > ret(new PyFST<S>());
+        Difference(a, b, ret.get());
         return ret;
       })
 
     .def("Invert", [](const PyFST<S> &a) {
         ErrorCatcher e;
-        PyFST<S> *ret = a.Copy();
-        Invert(ret);
+        unique_ptr<PyFST<S> > ret(a.Copy());
+        Invert(ret.get());
         return ret;
       })
 
     .def("Prune", [](const PyFST<S> &a, py::object weight) {
         ErrorCatcher e;
         FSTWeight<S> weight_threshold(weight);
-        PyFST<S> *ret = new PyFST<S>();
-        Prune(a, ret, weight_threshold);
+        unique_ptr<PyFST<S> > ret(new PyFST<S>());
+        Prune(a, ret.get(), weight_threshold);
         return ret;
       })
 
     .def("Intersect", [](const PyFST<S> &a, const PyFST<S> &b) {
-        PyFST<S> *ret = new PyFST<S>();
-        Intersect(a, b, ret);
+        unique_ptr<PyFST<S> > ret(new PyFST<S>());
+        Intersect(a, b, ret.get());
         return ret;
       })
 
     .def("Union", [](const PyFST<S> &a, const PyFST<S> &b) {
         ErrorCatcher e;
-        PyFST<S> *ret = a.Copy();
-        Union(ret, b);
+        unique_ptr<PyFST<S> > ret(a.Copy());
+        Union(ret.get(), b);
         return ret;
       })
 
     .def("Minimize", [](const PyFST<S> &a, double delta) {
         ErrorCatcher e;
-        PyFST<S> *ret = a.Copy();
-        Minimize(ret, static_cast<PyFST<S>* >(nullptr), delta);
+        unique_ptr<PyFST<S> > ret(a.Copy());
+        Minimize(ret.get(), static_cast<PyFST<S>* >(nullptr), delta);
         return ret;
       })
 
     .def("Push", [](const PyFST<S> &a, int mode) {
         ErrorCatcher e;
-        PyFST<S> *ret = new PyFST<S>();
+        unique_ptr<PyFST<S> > ret(new PyFST<S>());
         if(mode == 0) {
-          Push<PyArc<S>, REWEIGHT_TO_INITIAL>(a, ret, kPushWeights);
+          Push<PyArc<S>, REWEIGHT_TO_INITIAL>(a, ret.get(), kPushWeights);
         } else {
-          Push<PyArc<S>, REWEIGHT_TO_FINAL>(a, ret, kPushWeights);
+          Push<PyArc<S>, REWEIGHT_TO_FINAL>(a, ret.get(), kPushWeights);
         }
         return ret;
       })
 
     .def("ShortestPath", [](const PyFST<S> &a, int count) {
         ErrorCatcher e;
-        PyFST<S> *ret = new PyFST<S>();
-        ShortestPath(a, ret, count);
+        unique_ptr<PyFST<S> > ret(new PyFST<S>());
+        ShortestPath(a, ret.get(), count);
+        return ret;
+      })
+
+    .def("ShortestDistance", [](const PyFST<S> &a, bool reverse) {
+        ErrorCatcher e;
+        vector<FSTWeight<S> > distances;
+        ShortestDistance(a, &distances, reverse);
+
+        vector<py::object> ret;
+        ret.reserve(distances.size());
+        for(auto &w : distances) {
+          ret.push_back(w.PythonObject());
+        }
+
         return ret;
       })
 
     .def("RmEpsilon", [](const PyFST<S> &a) {
         ErrorCatcher e;
-        PyFST<S> *ret = a.Copy();
-        RmEpsilon(ret);
+        unique_ptr<PyFST<S> > ret(a.Copy());
+        RmEpsilon(ret.get());
         return ret;
       })
 
     .def("RandomPath", [](const PyFST<S> &a, int count, uint64 rand_seed) {
-        PyFST<S> *ret = new PyFST<S>();
+        ErrorCatcher e;
+        unique_ptr<PyFST<S> > ret(new PyFST<S>());
 
         PythonArcSelector<S>  selector(rand_seed);
         // unsure how having the count as the weight will work?  The output semiring is potentially the same as this one??
         // but we could get the counts back??
         // maybe we should just wrap the FST with the value class instead of having the customized seminring?
         RandGenOptions<PythonArcSelector<S> > ops(selector, std::numeric_limits<int32>::max(), count, true);
-        RandGen(a, ret, ops);
+        RandGen(a, ret.get(), ops);
 
         return ret;
       })
