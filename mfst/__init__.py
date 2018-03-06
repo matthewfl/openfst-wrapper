@@ -8,10 +8,22 @@ import openfst_wrapper_backend as _backend
 from collections import namedtuple as _namedtuple
 from random import randint as _randint
 
-ArcType = _namedtuple('Arc', ['ilabel', 'olabel', 'nextstate', 'weight'])
+
+ArcType = _namedtuple('Arc', ['input_label', 'output_label', 'nextstate', 'weight'])
 
 
-class AbstractSemiring(object):
+# rename this to semiring weight
+class AbstractSemiringWeight(object):
+    """
+    Defines the base class that all semirings should inherit from.
+
+
+    Attributes:
+        semiring_type: {'base', 'path'} defines which properties this semiring has as this will construct a different backing FST
+    """
+
+    # The properties of this semiring, will be used when constructing a new FST
+    semiring_properties = 'base'
 
     @classmethod
     def zero(cls):
@@ -29,19 +41,26 @@ class AbstractSemiring(object):
 
     def __add__(self, other):
         """
-        Semiring add
+        Semiring add (oplus).
+
+        Return a new instance of this class that corresponds with: self (+) other
         """
         raise NotImplementedError()
 
     def __mul__(self, other):
         """
-        Semiring multiply
+        Semiring multiply (otimes).
+
+        Return a new instance of this class that corresponds with: self (*) other
         """
         raise NotImplementedError()
 
     def __div__(self, other):
         """
         Division used in weight pushing
+
+        Return a new instance of this class that corresponds with: self (*) (other)^{-1}
+        If not a member of the semiring, then raise an exception
         """
         raise NotImplementedError()
 
@@ -53,8 +72,10 @@ class AbstractSemiring(object):
 
     def _member(self):
         """
-        Checks if the current item is a member of the semiring
+        Checks if the current instance is a member of the semiring
         (Eg float is not nan)
+
+        Called from openFST
         """
         raise NotImplementedError()
 
@@ -73,6 +94,8 @@ class AbstractSemiring(object):
     def _sampling_weight(self):
         """
         Return a positive unnormalized floating point value that can be used to sample this arc
+
+        Locally normallized outgoing from a particular state
         """
         raise NotImplementedError()
 
@@ -100,7 +123,8 @@ class AbstractSemiring(object):
         return self.__div__(other)
 
 
-class ValueSemiring(AbstractSemiring):
+# plus times semiring weight over python objects
+class PythonValueSemiringWeight(AbstractSemiringWeight):
 
     def __init__(self, value=0):
         super().__init__()
@@ -161,13 +185,7 @@ class ValueSemiring(AbstractSemiring):
         return hash(self.value)
 
     def __eq__(self, other):
-        return isinstance(other, ValueSemiring) and self.value == other.value
-
-    def __float__(self):
-        return float(self.value)
-
-    def __int__(self):
-        return int(self.value)
+        return isinstance(other, PythonValueSemiringWeight) and self.value == other.value
 
     def __repr__(self):
         return f'{type(self).__name__}({self.value})'
@@ -178,29 +196,12 @@ class FST(object):
     Wraps a mutable FST class
     """
 
-    def __init__(self, fst='base', semiring_class=None, acceptor=False, _character_fst=False):
-        if isinstance(fst, str):
-            self._fst = {
-                # these classes are defined in c++ to wrap openfst
-                'base': _backend.FSTBase,
-                'path': _backend.FSTPath,
-            }[fst]()
-        else:
-            self._fst = fst
-
-        # if we are an acceptor machine, then we want the input and output labels to be the same
-        # setting this to true will automattically copy the input label to the output label in add_arc
-        self._acceptor = acceptor
-        # the arcs input and output labels are in general ints, but we had support for using a single character string
-        # and passing that through ord() and chr() to print them in the graphics that we are drawing.  So if that is being
-        # used, then this will get set to true inside of add_arc
-        self._character_fst = _character_fst
-
+    def __init__(self, semiring_class=None, acceptor=False, _character_fst=False, _fst=None):
         if not semiring_class:
-            self._semiring_class = ValueSemiring
+            self._semiring_class = PythonValueSemiringWeight
         else:
             # quick sanity check that this implements the semiring class
-            assert issubclass(semiring_class, AbstractSemiring)
+            assert issubclass(semiring_class, AbstractSemiringWeight)
             zero = semiring_class.zero()
             one = semiring_class.one()
             assert isinstance(zero, semiring_class)
@@ -210,10 +211,27 @@ class FST(object):
 
             self._semiring_class = semiring_class
 
+        if _fst:
+            self._fst = _fst
+        else:
+            self._fst = {
+                # these classes are defined in c++ to wrap openfst
+                'base': _backend.FSTBase,
+                'path': _backend.FSTPath,
+            }[self._semiring_class.semiring_properties]()
+
+        # if we are an acceptor machine, then we want the input and output labels to be the same
+        # setting this to true will automattically copy the input label to the output label in add_arc
+        self._acceptor = acceptor
+        # the arcs input and output labels are in general ints, but we had support for using a single character string
+        # and passing that through ord() and chr() to print them in the graphics that we are drawing.  So if that is being
+        # used, then this will get set to true inside of add_arc
+        self._character_fst = _character_fst
+
     def _make_weight(self, w):
         if isinstance(w, self._semiring_class):
             return w
-        assert not isinstance(w, AbstractSemiring), "Can not mix different types of weights in a FST"
+        assert not isinstance(w, AbstractSemiringWeight), "Can not mix different types of weights in a FST"
         if isinstance(w, str):
             # this can be returned by the C++ binding in the case that there is an invalid state
             if w == '__FST_INVALID__':
@@ -230,18 +248,20 @@ class FST(object):
         assert type(self._fst) is type(other._fst), "Can not mix FSTs with different properties"
         assert self._semiring_class is other._semiring_class, "Can not mix FSTs with different semirings"
 
-    def constructor(self, _fst=None):
+    def constructor(self, _fst=None, **kwargs):
         """Return a new instance of the FST using the same parameters"""
         if _fst:
             assert type(_fst) is type(self._fst), "type of fst differs from our own type"
         else:
             _fst = type(self._fst)()
-        return type(self)(
-            fst=_fst,
+        params = dict(
+            _fst=_fst,
             semiring_class=self._semiring_class,
             acceptor=self._acceptor,
             _character_fst=self._character_fst
         )
+        params.update(kwargs)
+        return type(self)(**params)
 
     @property
     def semiring_one(self):
@@ -263,21 +283,18 @@ class FST(object):
         Creates a FST which converts the empty string (epsilon) to string.
         String can be a normal python string or an iterable (list or tuple) of integers
         """
-        ret = self.constructor()
+        ret = self.constructor(acceptor=True)
         last = ret.add_state()
         ret.start_state = last
         for s in string:  # string can be any iterable object, eg (a normal string or a tuple of ints)
             state = ret.add_state()
-            if self._acceptor:
-                ret.add_arc(last, state, output_label=s, input_label=s)
-            else:
-                ret.add_arc(last, state, output_label=s)
+            ret.add_arc(last, state, output_label=s, input_label=s)
             last = state
         if last:
             ret.set_final_weight(last)
         return ret
 
-    def get_string(self):
+    def get_unique_lower_string(self):
         """
         Returns the string representation in the case that there is only a single path in the fst
         """
@@ -290,7 +307,7 @@ class FST(object):
             edges = list(self.get_arcs(state))
             if len(edges) != 1:
                 raise RuntimeError("FST does not contain exactly one path")
-            l = edges[0].olabel
+            l = edges[0].output_label
             if l != 0:  # the epsilon state
                 if self._character_fst:
                     ret.append(chr(l))
@@ -526,7 +543,6 @@ class FST(object):
         self._check_same_fst(other)
         return self.constructor(self._fst.Union(other._fst))
 
-
     def intersect(self, other):
         """
         This operation computes the intersection (Hadamard product) of two
@@ -640,6 +656,21 @@ class FST(object):
         """
         return self.constructor(self._fst.RmEpsilon())
 
+    def lift(self, semiring, converter=None):
+        """
+        This operation builds a new FST that accepts the same inputs and outputs as this FST
+        but the weights have been converted into the new semiring
+        """
+        if not converter:
+            converter = lambda x: x
+        ret = FST(semiring, acceptor=self._acceptor, _character_fst=self._character_fst)
+        for i in range(self.num_states):
+            ret.add_state()  # would be nice if this did not need to be called in a loop
+        for i in range(self.num_states):
+            for arc in self.get_arcs(i):
+                ret.add_arc(i, arc.nextstate, converter(arc.weight), arc.input_label, arc.output_label)
+        return ret
+
     def __str__(self):
         if self.num_states < 10:
             # if the FST is small enough that we might want to print the whole thing in the string
@@ -663,6 +694,7 @@ class FST(object):
         # mostly copied from dagre-d3 tutorial / demos
         from uuid import uuid4
         import json
+        from collections import defaultdict
         ret = ''
         if self.num_states == 0:
             return '<code>Empty FST</code>'
@@ -723,7 +755,6 @@ class FST(object):
         } catch { setTimeout(render_d3, 50); return; } // requirejs is broken on external domains
         //alert("loaded");
         var g = new dagreD3.graphlib.Graph().setGraph({});
-
         '''
 
         # here we are actually going to read the states from the FST and generate nodes for them
@@ -750,41 +781,37 @@ class FST(object):
             make_chr = str
 
         for sid in range(self.num_states):
-            to = set()
+            to = defaultdict(list)
             for arc in self.get_arcs(sid):
                 if arc.nextstate == -1:
                     continue
-                # if there are multiple arcs between a state, just draw one
-                # otherwise the drawing system is going to have problems
-                if arc.nextstate in to:
-                    continue
-                to.add(arc.nextstate)
 
                 label = ''
-                if arc.ilabel == 0:
+                if arc.input_label == 0:
                     label += '\u03B5'  # epsilon
-                elif arc.ilabel == 32 and self._character_fst:
+                elif arc.input_label == 32 and self._character_fst:
                     label += '(spc)'
-                elif arc.ilabel < 32:
-                    label += str(arc.ilabel)
+                elif arc.input_label < 32:
+                    label += str(arc.input_label)
                 else:
-                    label += make_chr(arc.ilabel)
-                label += ':'
-                if arc.olabel == 0:
-                    label += '\u03B5'
-                elif arc.olabel == 32 and self._character_fst:
-                    label += '(spc)'
-                elif arc.olabel < 32:
-                    label += str(arc.olabel)
-                else:
-                    label += make_chr(arc.olabel)
+                    label += make_chr(arc.input_label)
+                if arc.input_label != arc.output_label:
+                    label += ':'
+                    if arc.output_label == 0:
+                        label += '\u03B5'
+                    elif arc.output_label == 32 and self._character_fst:
+                        label += '(spc)'
+                    elif arc.output_label < 32:
+                        label += str(arc.output_label)
+                    else:
+                        label += make_chr(arc.output_label)
                 label += f'/{arc.weight}'
-
-                ret += f'g.setEdge("state_{sid}", "state_{arc.nextstate}", {{ arrowhead: "vee", label: {json.dumps(label)} }});\n'
-
-            # TODO: figure out ending weight and how to encode that in the graph?
-            # atm this is just skipping the ending weight
-
+                to[arc.nextstate].append(label)
+            for dest, values in to.items():
+                if len(values) > 3:
+                    values = values[0:2] + ['...']
+                label = '\n'.join(values)
+                ret += f'g.setEdge("state_{sid}", "state_{dest}", {{ arrowhead: "vee", label: {json.dumps(label)} }});\n'
 
         # make the start state green
         ret += f'g.node("state_{self.start_state}").style = "fill: #7f7"; \n'
@@ -814,3 +841,31 @@ class FST(object):
         </script>
         '''
         return ret
+
+
+try:
+    # use numpy to define the real values in the case that we can
+    # import it
+    from numpy import isreal as _isreal, isscalar as _isscalar
+
+    def _is_real(x):
+        return _isreal(x) and _isscalar(x)
+except ImportError:
+    def _is_real(x):
+        return isinstance(x, (int, float))
+
+
+class RealSemiringWeight(PythonValueSemiringWeight):
+    """
+    The standard <+,*> semiring defined
+    """
+
+    def __init__(self, v):
+        assert _is_real(v), f"Value {v} is not a number"
+        super().__init__(v)
+
+    def __float__(self):
+        return float(self.value)
+
+    def __int__(self):
+        return int(self.value)

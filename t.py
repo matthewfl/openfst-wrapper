@@ -4,7 +4,7 @@ import mfst
 
 num_weights = 0
 
-class MyWeight(mfst.AbstractSemiring):
+class MyWeight(mfst.AbstractSemiringWeight):
 
     def __init__(self, v=0):
         global num_weights
@@ -42,7 +42,7 @@ class MyWeight(mfst.AbstractSemiring):
         print('calling string')#, type(self), dir(self))
         return 'MyWeight({})'.format(self._value)
 
-gg = mfst.FST('base', MyWeight)
+gg = mfst.FST(MyWeight)
 
 for i in range(9):
     gg.add_state()
@@ -81,7 +81,7 @@ assert num_weights == 0 # check that everything got deleted
 gg = mfst.FST()
 sf = gg.create_from_string('test')
 print(sf)
-assert sf.get_string() == 'test'
+assert sf.get_unique_lower_string() == 'test'
 
 assert sf._repr_html_() is not None
 print(sf._repr_html_())
@@ -104,8 +104,10 @@ def build_hc_fst(fst, n=3):
     fst.add_arc(c[-1], final)
     fst.add_arc(h[-1], final)
 
+class pathSemiring(mfst.PythonValueSemiringWeight):
+    semiring_properties = 'path'
 
-hc = mfst.FST('path')
+hc = mfst.FST(pathSemiring)
 build_hc_fst(hc)
 print(hc.determinize())
 
