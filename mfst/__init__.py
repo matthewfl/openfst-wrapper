@@ -45,7 +45,7 @@ class AbstractSemiringWeight(object):
 
         Return a new instance of this class that corresponds with: self (+) other
         """
-        raise NotImplementedError()
+        raise NotImplementedError('__add__')
 
     def __mul__(self, other):
         """
@@ -53,7 +53,7 @@ class AbstractSemiringWeight(object):
 
         Return a new instance of this class that corresponds with: self (*) other
         """
-        raise NotImplementedError()
+        raise NotImplementedError('__mul__')
 
     def __div__(self, other):
         """
@@ -62,13 +62,13 @@ class AbstractSemiringWeight(object):
         Return a new instance of this class that corresponds with: self (*) (other)^{-1}
         If not a member of the semiring, then raise an exception
         """
-        raise NotImplementedError()
+        raise NotImplementedError('__div__')
 
     def __pow__(self, n):
         """
         Power of self for n is an int
         """
-        raise NotImplementedError()
+        raise NotImplementedError('__pow__')
 
     def _member(self):
         """
@@ -77,13 +77,13 @@ class AbstractSemiringWeight(object):
 
         Called from openFST
         """
-        raise NotImplementedError()
+        raise NotImplementedError('_member')
 
     def _quantize(self, delta=.5):
         """
         Return a new instance that is bucketed
         """
-        raise NotImplementedError()
+        raise NotImplementedError('_quantize')
 
     def _reverse(self):
         """
@@ -97,27 +97,27 @@ class AbstractSemiringWeight(object):
 
         Locally normallized outgoing from a particular state
         """
-        raise NotImplementedError()
+        raise NotImplementedError('_sampling_weight')
 
     def _approx_eq(self, other, delta):
         """
-        Returns if this weight is approximatly equal to another other less than delta
+        Returns if this weight is approximately equal to another other less than delta
         """
-        raise NotImplementedError()
+        raise NotImplementedError('_approx_eq')
 
-    def __hash__(self):
+    def __hash__(self):  # hash is required if defining __eq__
         """
         Return the hash code for this instance
         (Will be used by openfst)
         """
-        raise NotImplementedError()
+        raise NotImplementedError('__hash__')
 
     def __eq__(self, other):
         """
         Return if this object is equal to another
         (Will be used by openfst)
         """
-        raise NotImplementedError()
+        raise NotImplementedError('__eq__')
 
     def __truediv__(self, other):
         return self.__div__(other)
@@ -227,6 +227,8 @@ class FST(object):
         # and passing that through ord() and chr() to print them in the graphics that we are drawing.  So if that is being
         # used, then this will get set to true inside of add_arc
         self._character_fst = _character_fst
+        # number of times that we have drawn this FST
+        self._draw_count = 0
 
     def _make_weight(self, w):
         if isinstance(w, self._semiring_class):
@@ -246,7 +248,7 @@ class FST(object):
         """Check that the other fst is the same type as us, otherwise we will run into problems"""
         assert isinstance(other, FST)
         assert type(self._fst) is type(other._fst), "Can not mix FSTs with different properties"
-        assert self._semiring_class is other._semiring_class, "Can not mix FSTs with different semirings"
+        assert self._semiring_class is other._semiring_class, "Can not mix FSTs with different semirings.  Use FST.lift to change between semirings"
 
     def constructor(self, _fst=None, **kwargs):
         """Return a new instance of the FST using the same parameters"""
@@ -294,7 +296,7 @@ class FST(object):
             ret.set_final_weight(last)
         return ret
 
-    def get_unique_lower_string(self):
+    def get_unique_lower_string(self, characters=False, integers=False):
         """
         Returns the string representation in the case that there is only a single path in the fst
         """
@@ -303,16 +305,22 @@ class FST(object):
         state = self.start_state
         seen = set()
         ret = []
+        if characters:
+            mode = chr
+        elif integers:
+            mode = lambda x: x
+        else:
+            if self._character_fst:
+                mode = chr
+            else:
+                mode = lambda x: x
         while state != -1:
             edges = list(self.get_arcs(state))
             if len(edges) != 1:
                 raise RuntimeError("FST does not contain exactly one path")
             l = edges[0].output_label
             if l != 0:  # the epsilon state
-                if self._character_fst:
-                    ret.append(chr(l))
-                else:
-                    ret.append(l)
+                ret.append(mode(l))
             if edges[0].nextstate in seen:
                 raise RuntimeError("FST contains cycle")
             seen.add(state)
@@ -374,7 +382,6 @@ class FST(object):
         Add an arc between states from->to with weight (default 1).
         input_label and output label should be ints that map to a label (0 == epsilon)
         """
-        # assert if the state is valid otherwise openfst calls exit(1)
         assert (from_state >= 0 and from_state < self.num_states and
                 to_state >= 0 and to_state < self.num_states), "Invalid state id"
         if isinstance(input_label, str):
@@ -458,16 +465,20 @@ class FST(object):
         self._check_same_fst(other)
         return self.constructor(self._fst.Concat(other._fst))
 
-    def compose(self, other):
+    def compose(self, *other_fsts):
         """
         This operation computes the composition of two transducers. If A transduces
         string x to y with weight a and B transduces y to z with weight b, then their
         composition transduces string x to z with weight a (times) b.
 
         http://www.openfst.org/twiki/bin/view/FST/ComposeDoc
+
+        Will efficiently handle one or more FSTs composing self :: arg1 :: arg2 :: .... :: argN
         """
-        self._check_same_fst(other)
-        return self.constructor(self._fst.Compose(other._fst))
+        assert len(other_fsts) > 0, "Require at least one other FST to compose with"
+        for fst in other_fsts:
+            self._check_same_fst(fst)
+        return self.constructor(self._fst.Compose([f._fst for f in other_fsts]))
 
     def determinize(self, delta=1.0/1024, weight_threshold=None):
         """
@@ -485,6 +496,15 @@ class FST(object):
             weight_threshold = self._semiring_class()
 
         return self.constructor(self._fst.Determinize(delta, self._make_weight(weight_threshold)))
+
+    def disambiguate(self):
+        """
+        This operation disambiguates a weighted transducer. The result will be an
+        equivalent FST that has the property that no two successful paths have
+        the same input labeling. For this algorithm, epsilon transitions are
+        treated as regular symbols (cf. RmEpsilon).
+        """
+        return self.constructor(self._fst.Disambiguate())
 
     def project(self, type='input'):
         """
@@ -668,11 +688,16 @@ class FST(object):
             ret.add_state()  # would be nice if this did not need to be called in a loop
         for i in range(self.num_states):
             for arc in self.get_arcs(i):
-                ret.add_arc(i, arc.nextstate, converter(arc.weight), arc.input_label, arc.output_label)
+                if arc.nextstate == -1:
+                    # then this is a final state
+                    ret.set_final_weight(i, weight=converter(arc.weight))
+                else:
+                    ret.add_arc(i, arc.nextstate, converter(arc.weight), arc.input_label, arc.output_label)
+        ret.start_state = self.start_state
         return ret
 
     def __str__(self):
-        if self.num_states < 10:
+        if self.num_states < 10 and sum(self.num_arcs(s) for s in range(self.num_states)) < 300:
             # if the FST is small enough that we might want to print the whole thing in the string
             return self.full_str()
         else:
@@ -693,6 +718,7 @@ class FST(object):
         """
         # mostly copied from dagre-d3 tutorial / demos
         from uuid import uuid4
+        #from hashlib import md5
         import json
         from collections import defaultdict
         ret = ''
@@ -700,62 +726,7 @@ class FST(object):
             return '<code>Empty FST</code>'
         # sigh...loading these as external files
         # ipython is loading with require js
-        ret += '''
-        <script>
-        require.config({
-        paths: {
-        "d3": "https://cdnjs.cloudflare.com/ajax/libs/d3/4.13.0/d3",
-        "dagreD3": "https://cdnjs.cloudflare.com/ajax/libs/dagre-d3/0.6.1/dagre-d3.min"
-        }
-        });
-        </script>
-        <!--script>
-        (function() {
-        if(typeof d3 == "undefined") {
-        var script   = document.createElement("script");
-        script.type  = "text/javascript";
-        script.src   = "https://cdnjs.cloudflare.com/ajax/libs/d3/4.13.0/d3.js";
-        document.body.appendChild(script);
 
-        var script   = document.createElement("script");
-        script.type  = "text/javascript";
-        script.src   = "https://cdnjs.cloudflare.com/ajax/libs/dagre-d3/0.6.1/dagre-d3.min.js";
-        document.body.appendChild(script);
-        }
-        })();
-        </script-->
-        <style>
-        .node rect,
-        .node circle,
-        .node ellipse {
-        stroke: #333;
-        fill: #fff;
-        stroke-width: 1px;
-        }
-
-        .edgePath path {
-        stroke: #333;
-        fill: #333;
-        stroke-width: 1.5px;
-        }
-        </style>
-        '''
-
-
-        obj = 'fst_' + uuid4().hex
-        ret += f'<center><svg width="850" height="600" id="{obj}"><g/></svg></center>'
-        ret += '''
-        <script>
-        requirejs(['d3', 'dagreD3'], function() {});
-        (function render_d3() {
-        var d3, dagreD3;
-        try {
-        d3 = require('d3');
-        dagreD3 = require('dagreD3');
-        } catch { setTimeout(render_d3, 50); return; } // requirejs is broken on external domains
-        //alert("loaded");
-        var g = new dagreD3.graphlib.Graph().setGraph({});
-        '''
 
         # here we are actually going to read the states from the FST and generate nodes for them
         # in the output source code
@@ -764,7 +735,7 @@ class FST(object):
         for sid in range(self.num_states):
             finalW = ''
             ww = self._fst.FinalWeight(sid)
-            if '__FST_ZERO__' != ww:  # look at at the raw returned value to see if it is zero (unset)
+            if not isinstance(ww, str) or '__FST_ZERO__' != ww:  # look at the raw returned value to see if it is zero (unset)
                 ww = self._make_weight(ww)
                 if zero != ww:
                     finalW = f'\n({ww})'
@@ -809,15 +780,83 @@ class FST(object):
                 to[arc.nextstate].append(label)
             for dest, values in to.items():
                 if len(values) > 3:
-                    values = values[0:2] + ['...']
+                    values = values[0:2] + ['. . .']
                 label = '\n'.join(values)
                 ret += f'g.setEdge("state_{sid}", "state_{dest}", {{ arrowhead: "vee", label: {json.dumps(label)} }});\n'
 
-        # make the start state green
-        ret += f'g.node("state_{self.start_state}").style = "fill: #7f7"; \n'
+        if self.start_state >= 0:
+            # make the start state green
+            ret += f'g.node("state_{self.start_state}").style = "fill: #7f7"; \n'
 
-        ret += f'var svg = d3.select("#{obj}"); \n'
-        ret += '''
+
+        ret2 = '''
+        <script>
+        require.config({
+        paths: {
+        "d3": "https://cdnjs.cloudflare.com/ajax/libs/d3/4.13.0/d3",
+        "dagreD3": "https://cdnjs.cloudflare.com/ajax/libs/dagre-d3/0.6.1/dagre-d3.min"
+        }
+        });
+        try {
+        requirejs(['d3', 'dagreD3'], function() {});
+        } catch (e) {}
+        try {
+        require(['d3', 'dagreD3'], function() {});
+        } catch (e) {}
+        </script>
+        <!--script>
+        (function() {
+        if(typeof d3 == "undefined") {
+        var script   = document.createElement("script");
+        script.type  = "text/javascript";
+        script.src   = "https://cdnjs.cloudflare.com/ajax/libs/d3/4.13.0/d3.js";
+        document.body.appendChild(script);
+
+        var script   = document.createElement("script");
+        script.type  = "text/javascript";
+        script.src   = "https://cdnjs.cloudflare.com/ajax/libs/dagre-d3/0.6.1/dagre-d3.min.js";
+        document.body.appendChild(script);
+        }
+        })();
+        </script-->
+        <style>
+        .node rect,
+        .node circle,
+        .node ellipse {
+        stroke: #333;
+        fill: #fff;
+        stroke-width: 1px;
+        }
+
+        .edgePath path {
+        stroke: #333;
+        fill: #333;
+        stroke-width: 1.5px;
+        }
+        </style>
+        '''
+
+
+        obj = 'fst_' + uuid4().hex
+        #ms = md5(ret.encode('ascii', 'ignore')).hexdigest()
+        #obj = f'fst_{self._draw_count}_{ms}'
+        self._draw_count += 1
+        ret2 += f'<center><svg width="850" height="600" id="{obj}"><g/></svg></center>'
+        ret2 += '''
+        <script>
+        (function render_d3() {
+        var d3, dagreD3;
+        try {
+        d3 = require('d3');
+        dagreD3 = require('dagreD3');
+        } catch (e) { setTimeout(render_d3, 50); return; } // requirejs is broken on external domains
+        //alert("loaded");
+        var g = new dagreD3.graphlib.Graph().setGraph({});
+        '''
+        ret2 += ret
+
+        ret2 += f'var svg = d3.select("#{obj}"); \n'
+        ret2 += '''
         var inner = svg.select("g");
 
         // Set up zoom support
@@ -840,12 +879,11 @@ class FST(object):
         })();
         </script>
         '''
-        return ret
+        return ret2
 
 
 try:
-    # use numpy to define the real values in the case that we can
-    # import it
+    # use numpy to define the real values in the case that we can import it
     from numpy import isreal as _isreal, isscalar as _isscalar
 
     def _is_real(x):
@@ -857,11 +895,11 @@ except ImportError:
 
 class RealSemiringWeight(PythonValueSemiringWeight):
     """
-    The standard <+,*> semiring defined
+    The standard <+,*> semiring
     """
 
     def __init__(self, v):
-        assert _is_real(v), f"Value {v} is not a number"
+        assert _is_real(v), f"Value {v} is not a real number"
         super().__init__(v)
 
     def __float__(self):

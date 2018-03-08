@@ -49,6 +49,7 @@
 #include <fst/randgen.h>
 #include <fst/shortest-distance.h>
 #include <fst/topsort.h>
+#include <fst/disambiguate.h>
 
 #include <fst/script/print.h>
 
@@ -82,7 +83,8 @@ public:
     // reset
     cerr.rdbuf(backup);
     string e = buff.str();
-    if(!e.empty() && std::current_exception() == nullptr) {
+    if(!e.empty() && std::current_exception() == nullptr &&
+       !std::uncaught_exception() && PyErr_Occurred() == nullptr) {
       PyErr_SetString(PyExc_RuntimeError, e.c_str());
       //throw fsterror(e);
       throw py::error_already_set();
@@ -115,7 +117,7 @@ bool check_is_weight(py::object &weight) {
 template<uint64 S>
 class FSTWeight {
 private:
-  FSTWeight(int32 g) : impl(), flags(g) {} // the static value constructor
+  FSTWeight(int32 g, bool __) : impl(), flags(g), count(0) {} // the static value constructor
 public:
   using ReverseWeight = FSTWeight<S>;
 
@@ -124,36 +126,38 @@ public:
     isOne = 0x2,
     isNoWeight = 0x4,
     isSet = 0x8,
-    isCount = 0x10
+    isCount = 0x10,
   };
 
   // the python object that we are wrapping
   int16_t flags;
   py::object impl;
-  uint32 count = 0;  // represents a count in the case that it added two elements of the static semiring
+  uint32 count;  // represents a count in the case that it added two elements of the static semiring
 
-  FSTWeight() : impl() {
-    flags = isNoWeight;
+  FSTWeight() : impl(), flags(isNoWeight), count(0) {
   }
 
-  FSTWeight(uint32 count, bool __) : flags(isCount), count(count) {}
+  FSTWeight(uint32 count) : flags(isCount), count(count) {
+    assert(count > 0);
+    if(count  == 0)
+      throw fsterror("Invalid static count");
+  }
 
-  FSTWeight(py::object i) : impl(i) {
+  FSTWeight(py::object i) : impl(i), flags(isSet), count(0) {
     if(!check_is_weight(impl))
       throw fsterror("Value does not implement Weight interface");
-    flags = isSet;
   }
 
   static const FSTWeight<S>& Zero() {
-    static const FSTWeight<S> zero = FSTWeight<S>(isZero);
+    static const FSTWeight<S> zero = FSTWeight<S>(isZero, true);
     return zero;
   }
   static const FSTWeight<S>& One() {
-    static const FSTWeight<S> one = FSTWeight<S>(isOne);
+    static const FSTWeight<S> one = FSTWeight<S>(isOne, true);
     return one;
   }
   static const FSTWeight<S>& NoWeight() {
-    static const FSTWeight<S> no_weight = FSTWeight<S>(isNoWeight);
+    static const FSTWeight<S> no_weight = FSTWeight<S>(isNoWeight, true);
     return no_weight;
   }
 
@@ -163,9 +167,7 @@ public:
   }
 
   static const string& Type() {
-    // TODO: this is wrong
-    // we should register our own type of weight, but for some reason that isn't working????
-    static const string type("python"); //tropical");
+    static const string type("python");
     return type;
   }
 
@@ -233,6 +235,7 @@ public:
   FSTWeight<S>& operator=(const FSTWeight<S>& other) {
     impl = other.impl;
     flags = other.flags;
+    count = other.count;
     return *this;
   }
 
@@ -303,13 +306,13 @@ FSTWeight<S> Plus(const FSTWeight<S> &w1, const FSTWeight<S> &w2) {
     return w1;
   }
   if(w1.flags == FSTWeight<S>::isOne || w2.flags == FSTWeight<S>::isOne) {
-    return FSTWeight<S>(2, true); // the counting element
+    return FSTWeight<S>(2); // the counting element
     //throw fsterror("Trying to add with the static semiring one");
   }
   py::object o1 = w1.impl;
   if(w1.flags == FSTWeight<S>::isCount) {
     if(w2.flags == FSTWeight<S>::isCount) {
-      return FSTWeight<S>(w1.count + w2.count, true);
+      return FSTWeight<S>(w1.count + w2.count);
     } else {
       assert(w2.flags == FSTWeight<S>::isSet);
       o1 = w1.buildObject(w2.impl);
@@ -332,10 +335,10 @@ FSTWeight<S> Times(const FSTWeight<S> &w1, const FSTWeight<S> &w2) {
   }
   py::object o1 = w1.impl;
   if(w1.flags == FSTWeight<S>::isCount) {
-    if(w2.flags == FSTWeight<S>::isCount) {
+    if(w2.flags != FSTWeight<S>::isSet) {
       throw fsterror("Undefined multiplication between two static count elements of the field");
     } else {
-      assert(w2.flags == FSTWeight<S>::isSet);
+      //assert(w2.flags == FSTWeight<S>::isSet);
       o1 = w1.buildObject(w2.impl);
     }
   }
@@ -352,15 +355,18 @@ FSTWeight<S> Divide(const FSTWeight<S> &w1, const FSTWeight<S> &w2) {
     return w1; // zero / anything = 0
   }
   py::object o1 = w1.impl;
-  if(w1.flags == FSTWeight<S>::isCount) {
-    if(w2.flags == FSTWeight<S>::isCount) {
+  if(w1.flags == FSTWeight<S>::isCount || w1.flags == FSTWeight<S>::isOne) {
+    if(w2.flags != FSTWeight<S>::isSet) {
       throw fsterror("Undefined division between two static count elements of the field");
     } else {
-      assert(w2.flags == FSTWeight<S>::isSet);
+      //assert(w2.flags == FSTWeight<S>::isSet);
       o1 = w1.buildObject(w2.impl);
     }
   }
 
+  // else if(w1.flags != FSTWeigh<S>::isSet) {
+  //   throw fsterror("Unable to divide unset weights");
+  // }
   py::object o2 = w2.buildObject(o1);
 
   return FSTWeight<S>(o1.attr("__div__")(o2));
@@ -446,42 +452,7 @@ using PyArc = ArcTpl<FSTWeight<S> >;
 template<uint64 S>
 using PyFST = VectorFst<PyArc<S>, VectorState<PyArc<S> > >;
 
-template<uint64 S>
-void add_arc(PyFST<S> &self, int64 from, int64 to,
-             int64 input_label, int64 output_label, py::object weight) {
-  // TODO: check if the weight is the correct python instance
-  ErrorCatcher e;
 
-  if(!check_is_weight(weight)) {
-    throw fsterror("weight is missing required method");
-  }
-
-  FSTWeight<S> w1(weight);
-  PyArc<S> a(input_label, output_label, w1, to);
-  self.AddArc(from, a);
-}
-
-template<uint64 S>
-void set_final(PyFST<S> &self, int64 state, py::object weight) {
-  ErrorCatcher e;
-
-  if(!check_is_weight(weight)) {
-    throw fsterror("weight is missing required method");
-  }
-
-  FSTWeight<S> w1(weight);
-  self.SetFinal(state, w1);
-}
-
-template<uint64 S>
-py::object final_weight(PyFST<S> &self, int64 state) {
-  ErrorCatcher e;
-
-  FSTWeight<S> finalW = self.Final(state);
-  py::object r = finalW.PythonObject();
-
-  return r;
-}
 
 template<uint64 S>
 class PythonArcSelector {
@@ -566,6 +537,81 @@ public:
   }
 };
 
+
+template<uint64 S>
+void add_arc(PyFST<S> &self, int64 from, int64 to,
+             int64 input_label, int64 output_label, py::object weight) {
+  // TODO: check if the weight is the correct python instance
+  ErrorCatcher e;
+
+  if(!check_is_weight(weight)) {
+    throw fsterror("weight is missing required method");
+  }
+
+  FSTWeight<S> w1(weight);
+  PyArc<S> a(input_label, output_label, w1, to);
+  self.AddArc(from, a);
+}
+
+template<uint64 S>
+void set_final(PyFST<S> &self, int64 state, py::object weight) {
+  ErrorCatcher e;
+
+  if(!check_is_weight(weight)) {
+    throw fsterror("weight is missing required method");
+  }
+
+  FSTWeight<S> w1(weight);
+  self.SetFinal(state, w1);
+}
+
+template<uint64 S>
+py::object final_weight(PyFST<S> &self, int64 state) {
+  ErrorCatcher e;
+
+  FSTWeight<S> finalW = self.Final(state);
+  py::object r = finalW.PythonObject();
+
+  return r;
+}
+
+template<uint64 S>
+unique_ptr<PyFST<S> > compose(const PyFST<S> & a, const vector<const PyFST<S>*> args) {
+  ErrorCatcher e;
+  unique_ptr<PyFST<S> > ret (new PyFST<S>());
+  // we have to sort the arcs such that this can be compared between objects
+  IOLabelCompare<PyArc<S> > comp;
+
+  // create all of the sorted FSTs as this is required for
+  vector<unique_ptr<ArcSortFst<PyArc<S>, IOLabelCompare<PyArc<S> > > > > sorted;
+  sorted.reserve(args.size() + 1);
+  sorted.emplace_back(new ArcSortFst<PyArc<S>, IOLabelCompare<PyArc<S> > >(a, comp));
+  for(const PyFST<S> *f : args) {
+    sorted.emplace_back(new ArcSortFst<PyArc<S>, IOLabelCompare<PyArc<S> > >(*f, comp));
+  }
+
+  vector<unique_ptr<ComposeFst<PyArc<S>, DefaultCacheStore<PyArc<S> > > > > lazy_composed;
+  if(args.size() > 1) {
+    lazy_composed.reserve(sorted.size() - 1);
+    const Fst<PyArc<S> > &s1 = *sorted[0];
+    const Fst<PyArc<S> > &s2 = *sorted[1];
+    lazy_composed.emplace_back(new ComposeFst<PyArc<S>, DefaultCacheStore<PyArc<S> > > (s1, s2));
+    for(int i = 2; i < sorted.size() - 1; i++) {
+      const Fst<PyArc<S> > &s3 = *lazy_composed.back();
+      const Fst<PyArc<S> > &s4 = *sorted[i];
+      lazy_composed.emplace_back(new ComposeFst<PyArc<S>, DefaultCacheStore<PyArc<S> > >(s3, s4));
+    }
+
+    // do the final compose operation into the ret object
+    Compose(*lazy_composed.back(), *sorted.back(), ret.get());
+  } else {
+    Compose(*sorted[0], *sorted[1], ret.get());
+  }
+
+  return ret;
+}
+
+
 template<uint64 S>
 void define_class(pybind11::module &m, const char *name) {
 
@@ -615,19 +661,7 @@ void define_class(pybind11::module &m, const char *name) {
         return ret;
       })
 
-
-    .def("Compose", [](const PyFST<S> &a, const PyFST<S> &b) {
-        ErrorCatcher e;
-        unique_ptr<PyFST<S> > ret (new PyFST<S>());
-        // we have to sort the arcs such that this can be compared between objects
-        IOLabelCompare<PyArc<S> > comp;
-        ArcSortFst<PyArc<S>, IOLabelCompare<PyArc<S> > > as(a, comp);
-        ArcSortFst<PyArc<S>, IOLabelCompare<PyArc<S> > > bs(b, comp);
-
-        Compose(as, bs, ret.get());
-        //Minimze(ret); // TODO: expose this
-        return ret;
-      })
+    .def("Compose", &compose<S>)
 
     .def("Determinize", [](const PyFST<S> &a, float delta, py::object weight) {
         ErrorCatcher e;
@@ -637,6 +671,15 @@ void define_class(pybind11::module &m, const char *name) {
 
         DeterminizeOptions<PyArc<S> > ops(delta, weight_threshold);
         Determinize(a, ret.get(), ops);
+        return ret;
+      })
+
+    .def("Disambiguate", [](const PyFST<S> &a) {
+        ErrorCatcher e;
+        unique_ptr<PyFST<S> > ret(new PyFST<S>());
+
+        Disambiguate(a, ret.get());
+
         return ret;
       })
 
@@ -652,7 +695,13 @@ void define_class(pybind11::module &m, const char *name) {
     .def("Difference", [](const PyFST<S> &a, const PyFST<S> &b) {
         ErrorCatcher e;
         unique_ptr<PyFST<S> > ret(new PyFST<S>());
-        Difference(a, b, ret.get());
+
+        IOLabelCompare<PyArc<S> > comp;
+        //const ArcSortFst<PyArc<S>, IOLabelCompare<PyArc<S> > > as(a, comp);
+        // sorted by the input lables
+        const ArcSortFst<PyArc<S>, IOLabelCompare<PyArc<S> > > bs(b, comp);
+
+        Difference(a, bs, ret.get());
         return ret;
       })
 
@@ -673,7 +722,16 @@ void define_class(pybind11::module &m, const char *name) {
 
     .def("Intersect", [](const PyFST<S> &a, const PyFST<S> &b) {
         unique_ptr<PyFST<S> > ret(new PyFST<S>());
-        Intersect(a, b, ret.get());
+
+        if((a.Properties(kNotAcceptor, false) & b.Properties(kNotAcceptor, false) & kNotAcceptor) != 0) {
+          throw fsterror("Intersect only works on FSA acceptors");
+        }
+
+        IOLabelCompare<PyArc<S> > comp;
+        //const ArcSortFst<PyArc<S>, IOLabelCompare<PyArc<S> > > as(a, comp);
+        const ArcSortFst<PyArc<S>, IOLabelCompare<PyArc<S> > > bs(b, comp);
+
+        Intersect(a, bs, ret.get());
         return ret;
       })
 
@@ -795,13 +853,12 @@ PYBIND11_MODULE(openfst_wrapper_backend, m) {
   define_class<kSemiring | kCommutative>(m, "FSTBase");
   define_class<kSemiring | kCommutative | kPath | kIdempotent>(m, "FSTPath");
 
-  //static py::exception<fsterror> ex(m, "FSTInternalError");
-  // py::register_exception_translator([](std::exception_ptr p) {
-  //     try {
-  //       if (p) std::rethrow_exception(p);
-  //     } catch (const fsterror &e) {
-  //       // Set MyException as the active python error
-  //       ex(e.what());
-  //     }
-  //   });
+  static py::exception<fsterror> ex(m, "FSTError");
+  py::register_exception_translator([](std::exception_ptr p) {
+      try {
+        if (p) std::rethrow_exception(p);
+      } catch (fsterror &e) {
+        ex(e.what());
+      }
+    });
 }
