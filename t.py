@@ -129,3 +129,5 @@ g._repr_html_()
 
 fst.random_path()
 f1.num_arcs(0)
+
+print('done')

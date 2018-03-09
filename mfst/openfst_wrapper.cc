@@ -104,7 +104,7 @@ bool check_is_weight(py::object &weight) {
     !getattr(weight, "__hash__").is_none() &&
     //hasattr(weight, "__hash__") &&
     hasattr(weight, "__eq__") &&
-    hasattr(weight, "__str__") &&
+    hasattr(weight, "_openfst_str") &&
     hasattr(weight, "_member") &&
     hasattr(weight, "_quantize") &&
     hasattr(weight, "_reverse") &&
@@ -113,6 +113,55 @@ bool check_is_weight(py::object &weight) {
     hasattr(weight, "one") &&
     hasattr(weight, "zero");
 }
+
+
+// this is SUCH a HACK
+namespace {
+  static py::handle semiring_class;
+  static py::object one_cache;
+  static py::object zero_cache;
+}
+class StaticPythonWeights {
+private:
+  //py::handle old;
+public:
+  StaticPythonWeights(py::handle semiring) {
+    if(!hasattr(semiring, "zero") || !hasattr(semiring, "one")) {
+      throw fsterror("Semiring does not have zero and one method to construct new instances");
+    }
+    //old = semiring_class;
+    assert(semiring_class.ptr() == nullptr);
+    semiring_class = semiring;
+  }
+  ~StaticPythonWeights() {
+    semiring_class = nullptr;
+    one_cache.release();
+    zero_cache.release();
+  }
+
+  static bool contains() {
+    // if(semiring_class.ptr() != nullptr) {
+    //   py::object foo = semiring_class.attr("one")();
+    // }
+    //return false;
+    return semiring_class.ptr() != nullptr;
+  }
+
+  static py::object One() {
+    // should have already checked
+    if(one_cache.ptr() == nullptr) {
+      one_cache = semiring_class.attr("one")();
+    }
+    return one_cache;
+  }
+
+  static py::object Zero() {
+    if(zero_cache.ptr() == nullptr) {
+      zero_cache = semiring_class.attr("zero")();
+    }
+    return zero_cache;
+  }
+};
 
 template<uint64 S>
 class FSTWeight {
@@ -148,12 +197,18 @@ public:
       throw fsterror("Value does not implement Weight interface");
   }
 
-  static const FSTWeight<S>& Zero() {
+  static FSTWeight<S> Zero() {
     static const FSTWeight<S> zero = FSTWeight<S>(isZero, true);
+    if(StaticPythonWeights::contains()) {
+      return FSTWeight<S>(StaticPythonWeights::Zero());
+    }
     return zero;
   }
-  static const FSTWeight<S>& One() {
+  static FSTWeight<S> One() {
     static const FSTWeight<S> one = FSTWeight<S>(isOne, true);
+    if(StaticPythonWeights::contains()) {
+      return FSTWeight<S>(StaticPythonWeights::One());
+    }
     return one;
   }
   static const FSTWeight<S>& NoWeight() {
@@ -219,7 +274,9 @@ public:
         return os << "(invalid)";
       }
     } else {
-      py::object s = impl.attr("__str__")();
+      // it appears that openfst uses this string inside of its determinize and disambiguate
+      // if there are minor non matching floating point errors then openfst breaks
+      py::object s = impl.attr("_openfst_str")();
       return os << s.cast<string>();
     }
   }
@@ -310,12 +367,13 @@ FSTWeight<S> Plus(const FSTWeight<S> &w1, const FSTWeight<S> &w2) {
     //throw fsterror("Trying to add with the static semiring one");
   }
   py::object o1 = w1.impl;
-  if(w1.flags == FSTWeight<S>::isCount) {
+  if(w1.flags != FSTWeight<S>::isSet) {
     if(w2.flags == FSTWeight<S>::isCount) {
       return FSTWeight<S>(w1.count + w2.count);
-    } else {
-      assert(w2.flags == FSTWeight<S>::isSet);
+    } else if(w2.flags == FSTWeight<S>::isSet) {
       o1 = w1.buildObject(w2.impl);
+    } else {
+      throw fsterror("Undefined addition between two static elements of the field");
     }
   }
   py::object o2 = w2.buildObject(o1);
@@ -334,7 +392,7 @@ FSTWeight<S> Times(const FSTWeight<S> &w1, const FSTWeight<S> &w2) {
     return FSTWeight<S>::Zero();
   }
   py::object o1 = w1.impl;
-  if(w1.flags == FSTWeight<S>::isCount) {
+  if(w1.flags != FSTWeight<S>::isSet) {
     if(w2.flags != FSTWeight<S>::isSet) {
       throw fsterror("Undefined multiplication between two static count elements of the field");
     } else {
@@ -663,8 +721,9 @@ void define_class(pybind11::module &m, const char *name) {
 
     .def("Compose", &compose<S>)
 
-    .def("Determinize", [](const PyFST<S> &a, float delta, py::object weight) {
+    .def("Determinize", [](const PyFST<S> &a, py::object semiring, float delta, py::object weight) {
         ErrorCatcher e;
+        StaticPythonWeights w(semiring);
         FSTWeight<S> weight_threshold(weight);
 
         unique_ptr<PyFST<S> > ret(new PyFST<S>());
@@ -674,8 +733,9 @@ void define_class(pybind11::module &m, const char *name) {
         return ret;
       })
 
-    .def("Disambiguate", [](const PyFST<S> &a) {
+    .def("Disambiguate", [](const PyFST<S> &a, py::object semiring) {
         ErrorCatcher e;
+        StaticPythonWeights w(semiring);
         unique_ptr<PyFST<S> > ret(new PyFST<S>());
 
         Disambiguate(a, ret.get());
@@ -695,6 +755,10 @@ void define_class(pybind11::module &m, const char *name) {
     .def("Difference", [](const PyFST<S> &a, const PyFST<S> &b) {
         ErrorCatcher e;
         unique_ptr<PyFST<S> > ret(new PyFST<S>());
+
+        if((a.Properties(kNotAcceptor, false) & b.Properties(kNotAcceptor, false) & kNotAcceptor) != 0) {
+          throw fsterror("Difference only works on FSA acceptors");
+        }
 
         IOLabelCompare<PyArc<S> > comp;
         //const ArcSortFst<PyArc<S>, IOLabelCompare<PyArc<S> > > as(a, comp);
