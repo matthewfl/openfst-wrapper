@@ -125,6 +125,9 @@ class AbstractSemiringWeight(object):
     def _openfst_str(self):
         return str(self)
 
+    def __repr__(self):
+        return f'{type(self).__name__}({str(self)})'
+
 
 # plus times semiring weight over python objects
 class PythonValueSemiringWeight(AbstractSemiringWeight):

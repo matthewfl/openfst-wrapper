@@ -1,0 +1,23 @@
+Develop command: `rm build -rf && CXXFLAGS='-g -DPy_DEBUG' python setup.py install && python t.py`
+
+
+Updating openfst:
+    ```
+    Download the latest version
+    mv openfst-1.6.6 openfst
+    set AM_MAINTAINER_MODE in configure.ac
+    update the version in setup.py
+    run `autoreconf -f -i` in the openfst directory
+    ```
+    https://www.gnu.org/software/automake/manual/html_node/maintainer_002dmode.html#maintainer_002dmode  This prevents rebuilds of configure when pulling openfst from git
+
+
+Memory leak on cycles:
+    If there is a way that a SemiringWeight can reference the FST that contains it, (eg a cycle in the reference graph) there will be a memory leak as the resulting FST object will not be garbage collected.
+    EG:
+        class MyWeight(AbstractWeight):
+
+        f = FST(MyWeight)
+        f.add_arc(weight=MyWeight(owning_fst = f))
+
+    To get around this, you could use a weak reference from the weights to the FST, or just ensure that there is no way that the weights can directly resference their own FST (eg put shared parameters in another class, or just keep the FSTs on the stack instead of saving them in an object).  Alternatly, you could loop through all of the weights in the FST and set their reference to the owning FST to None, at which point it can be GCed.
