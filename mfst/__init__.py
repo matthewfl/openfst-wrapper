@@ -125,9 +125,6 @@ class AbstractSemiringWeight(object):
     def _openfst_str(self):
         return str(self)
 
-    def _openfst_le(self, other):
-        return (self + other) == self
-
     def __repr__(self):
         return f'{type(self).__name__}({str(self)})'
 

@@ -459,6 +459,7 @@ FSTWeight<S> Power(const FSTWeight<S> &w1, int n) {
 
 template<uint64 S>
 bool operator==(FSTWeight<S> const &w1, FSTWeight<S> const &w2) {
+  if(&w1 == &w2) return true;
   py::object o1 = w1.impl;
   py::object o2 = w2.impl;
   if(w1.isBuiltIn() && !w2.isBuiltIn()) {
@@ -484,35 +485,9 @@ inline bool operator!=(FSTWeight<S> const &w1, FSTWeight<S> const &w2) {
   return !(w1 == w2);
 }
 
-// template<uint64 S>
-// inline bool operator<=(FSTWeight<S> const &w1, FSTWeight<S> const &w2) {
-//   // py::object o1 = w1.impl;
-//   // py::object o2 = w2.impl;
-//   // if(w1.isBuiltIn() && !w2.isBuiltIn()) {
-//   //   o1 = w1.buildObject(o2);
-//   // } else if(!w1.isBuiltIn() && w2.isBuiltIn()) {
-//   //   o2 = w2.buildObject(o1);
-//   // } else if(w1.flags == FSTWeight<S>::isCount) {
-//   //   throw fsterror("not defined with count");
-//   //   //return w2.flags == FSTWeight<S>::isCount && w1.count <= w2.count;
-//   // } else {
-//   //   return w1.flags == w2.flags;
-//   // }
-
-//   // py::object r = o1.attr("_openfst_le")(o2);
-//   // bool rr = r.cast<bool>();
-
-//   // return rr;
-
-//   auto r = Plus(w1, w2);
-//   assert(r == w1 || r == w2);
-//   assert(r != w1 || r != w2 || w1 == w2);
-//   return Plus(w1, w2) == w1;
-
-// }
-
 template<uint64 S>
 bool ApproxEqual(FSTWeight<S> const &w1, FSTWeight<S> const &w2, const float &delta) {
+  if(&w1 == &w2) return true;
   py::object o1 = w1.impl;
   py::object o2 = w2.impl;
   if(w1.isBuiltIn() && !w2.isBuiltIn()) {
@@ -524,6 +499,9 @@ bool ApproxEqual(FSTWeight<S> const &w1, FSTWeight<S> const &w2, const float &de
   } else if(w1.isBuiltIn() && w2.isBuiltIn()) {
     return w1.flags == w2.flags;
   }
+
+  // this is the same underlying python object, these should return equal
+  if(o1.ptr() == o2.ptr()) return true;
 
   py::object r = o1.attr("_approx_eq")(o2, delta);
   return r.cast<bool>();
@@ -708,71 +686,6 @@ unique_ptr<PyFST<S> > compose(const PyFST<S> & a, const vector<const PyFST<S>*> 
   return ret;
 }
 
-// template<uint64 S, bool b> struct path_runner {};
-// template <uint64 S> struct path_runner<S, false> {
-//   static void run(const PyFST<S> &a, PyFST<S> *r, int c) {
-//     throw fsterror("Shortest path only defined on path semirings");
-//   }
-// };
-
-// template <uint64 S> struct path_runner<S, true> {
-//   static void run(const PyFST<S> &a, PyFST<S> *r, int c) {
-//     vector<FSTWeight<S> > distances;
-//     fst::internal::NShortestPath(a, r, distances, c);
-//   }
-// };
-
-
-// #include <queue>
-
-// // there is a problem with open fsts implementation of getting the single best path,
-// // this has the wrong runtime due to using shortest distance which is O(V+E)
-// template<uint64 S>
-// void shortest_path_hack(const PyFST<S> &self, PyFST<S> &out) {
-//   vector<FSTWeight<S> > distances;
-
-//   // compute the shortest distance from all states to the ending state
-//   ShortestDistance(self, &distances, true);
-
-//   typedef typename PyFST<S>::StateId StateId;
-
-//   StateId last = out.AddState();
-//   out.SetStart(last);
-
-//   StateId s = self.Start();
-
-//   while(true) {
-//     FSTWeight<S> finalW = self.Final(s);
-//     if(distances[s] == finalW) {
-//       // then this is the final state
-//       out.SetFinal(last, finalW);
-//       return;
-//     }
-
-//     ArcIterator<PyFST<S> > iter(self, s);
-//     // loop through the start states and identify the one with the lowest final weight in the distance
-//     StateId next = -1;
-//     //FSTWeight<S> dist;
-//     PyArc<S> arc;
-//     while(!iter.Done()) {
-//       auto &v = iter.Value();
-//       if(distances[v.nextstate] <= distances[s]) {
-//         arc = v;
-//         next = arc.nextstate;
-//         //dist = distances[arc.nextstate];
-//         break;
-//       }
-//       iter.Next();
-//     }
-//     if(next == -1)
-//       return;
-//     StateId nn = out.AddState();
-//     PyArc<S> adding(arc.ilabel, arc.olabel, arc.weight, nn);
-//     out.AddArc(last, adding);
-//     last = nn;
-//     s = arc.nextstate;
-//   }
-// }
 
 
 template<uint64 S>
@@ -934,59 +847,9 @@ void define_class(pybind11::module &m, const char *name) {
         return ret;
       })
 
-    // .def("ShortestPathHack", [](const PyFST<S> &a) {
-    //     ErrorCatcher e;
-    //     unique_ptr<PyFST<S> > ret(new PyFST<S>());
-
-    //     if((S & kPath) == 0) {
-    //       throw fsterror("Shortest path only defined on path semirings");
-    //     }
-
-    //     shortest_path_hack(a, *ret.get());
-    //     return ret;
-    //   })
-
     .def("ShortestPath", [](const PyFST<S> &a, int count) {
         ErrorCatcher e;
         unique_ptr<PyFST<S> > ret(new PyFST<S>());
-
-        // if((S & kPath) == 0) {
-        //   throw fsterror("Shortest path only defined on path semirings");
-        // }
-
-        // shortest_path_hack(a, *ret.get());
-
-        // use the Astar implementation with no estimate of the future reward, this is just Dijkstra
-        // the documentation claims that it is finding the shortest path based off the weights
-        // but the default implementation is just using the state id at the sorting order
-
-        // vector<FSTWeight<S> > distances;
-        // typedef NaturalShortestFirstQueue<typename PyFST<S>::StateId, FSTWeight<S> > queue_t;
-        // queue_t queue(distances);
-
-        // // struct astart_estimate_s {
-        // //   const FSTWeight<S> one = FSTWeight<S>::One();
-        // //   const FSTWeight<S> &operator()(typename PyFST<S>::StateId) const { return one; }
-        // // };
-        // // astart_estimate_s estimate;
-        // // typedef NaturalAStarQueue<typename PyFST<S>::StateId, FSTWeight<S>, astart_estimate_s> queue_t;
-        // // queue_t queue(distances, estimate);
-
-        // AnyArcFilter<PyArc<S> > arc_filter;
-
-        // // precompute the distances from the start state to all of the states
-        // // without this openFST seems to hit some bug where it causes it to return the wrong answer
-        // //ShortestDistance(a, &distances, false);
-
-        // ShortestPathOptions<PyArc<S>, queue_t, AnyArcFilter<PyArc<S> > > opts(&queue, arc_filter, count, false);
-
-        // ShortestPath(a, ret.get(), &distances, opts);
-
-        // for(int d = 0; d < distances.size(); d++) {
-        //   cout << "distance: " << d << " " << distances[d] << endl;
-        // }
-
-        // path_runner<S, (S & kPath) != 0>::run(a, ret.get(), count);
 
         ShortestPath(a, ret.get(), count);
 
