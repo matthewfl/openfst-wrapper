@@ -125,6 +125,9 @@ class AbstractSemiringWeight(object):
     def _openfst_str(self):
         return str(self)
 
+    def _openfst_le(self, other):
+        return (self + other) == self
+
     def __repr__(self):
         return f'{type(self).__name__}({str(self)})'
 
@@ -491,7 +494,7 @@ class FST(object):
             acceptor=self._acceptor and all([f._acceptor for f in other_fsts])
         )
 
-    def determinize(self, delta=1.0/1024, weight_threshold=None):
+    def determinize(self, delta=1.0/1024, weight_threshold=None, *, allow_non_functional=False):
         """
         This operation determinizes a weighted transducer. The result will be an
         equivalent FST that has the property that no state has two transitions
@@ -500,15 +503,21 @@ class FST(object):
 
         http://www.openfst.org/twiki/bin/view/FST/DeterminizeDoc
 
-        delta: Quantization delta for subset weights.
+        delta: Quantization delta for binning weights.
         weight_threshold: Pruning weight threshold.
+        allow_non_functional: Only works on path semirings.  In the case that there are two
+          output sequences for a given input the one with the shorter path
+          will be used and the longer path discarded.
         """
         if weight_threshold is None:
             weight_threshold = self._semiring_class()
 
         return self.constructor(self._fst.Determinize(
             self._semiring_class,
-            delta, self._make_weight(weight_threshold)))
+            delta,
+            self._make_weight(weight_threshold),
+            allow_non_functional
+        ))
 
     def disambiguate(self):
         """
@@ -641,6 +650,9 @@ class FST(object):
         TropicalWeight).
 
         http://www.openfst.org/twiki/bin/view/FST/ShortestPathDoc
+
+        This uses the ShortestFirstQueue.  It works in the case that there are cycles
+        and no negative weights
         """
         return self.constructor(self._fst.ShortestPath(count))
 
@@ -652,6 +664,14 @@ class FST(object):
         oplus-sum of the weights of all the paths between p and q.
         """
         return [self._make_weight(w) for w in self._fst.ShortestDistance(reverse)]
+
+    def sum_paths(self):
+        """
+        Return the sum of the weight of all successful paths in an FST, i.e., the
+        shortest-distance from the initial state to the final states. Returns a
+        weight such that Member() is false if an error was encountered.
+        """
+        return self._fst.SumPaths()
 
     def topo_sort(self):
         """

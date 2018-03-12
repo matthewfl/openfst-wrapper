@@ -96,7 +96,7 @@ def build_hc_fst(fst, n=3):
     fst.add_arc(start, c[0], input_label='C')
     for i in range(n - 1):
         fst.add_arc(h[i], h[i+1], input_label='H')
-        fst.add_arc(c[i], c[i+1], input_label='C')
+        fst.add_arc(c[i], c[i+1], input_label='C', weight=fst.semiring(2))
         fst.add_arc(h[i], c[i+1], input_label='C')
         fst.add_arc(c[i], h[i+1], input_label='H')
     final = fst.add_state()
@@ -129,5 +129,7 @@ g._repr_html_()
 
 fst.random_path()
 f1.num_arcs(0)
+
+assert hc.shortest_path().num_states > 0
 
 print('done')
