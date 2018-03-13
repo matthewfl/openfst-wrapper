@@ -50,6 +50,7 @@
 #include <fst/shortest-distance.h>
 #include <fst/topsort.h>
 #include <fst/disambiguate.h>
+#include <fst/verify.h>
 
 #include <fst/script/print.h>
 
@@ -183,7 +184,7 @@ public:
   py::object impl;
   uint32 count;  // represents a count in the case that it added two elements of the static semiring
 
-  FSTWeight() : flags(isNoWeight), impl(), count(0) {
+  FSTWeight() : flags(isZero), impl(), count(0) {
   }
 
   FSTWeight(uint32 count) : flags(isCount), count(count) {
@@ -237,6 +238,7 @@ public:
     if(isBuiltIn()) {
       return (flags & (isOne | isZero | isCount)) != 0;
     } else {
+      assert(flags == isSet);
       py::object r = impl.attr("_member")();
       return r.cast<bool>();
     }
@@ -400,6 +402,9 @@ FSTWeight<S> Times(const FSTWeight<S> &w1, const FSTWeight<S> &w2) {
   if(w1.flags == FSTWeight<S>::isZero || w2.flags == FSTWeight<S>::isZero) {
     return FSTWeight<S>::Zero();
   }
+  if(w1.flags == FSTWeight<S>::isNoWeight || w2.flags == FSTWeight<S>::isNoWeight) {
+    return FSTWeight<S>::NoWeight();
+  }
   py::object o1 = w1.impl;
   if(w1.flags != FSTWeight<S>::isSet) {
     if(w2.flags != FSTWeight<S>::isSet) {
@@ -420,6 +425,9 @@ FSTWeight<S> Divide(const FSTWeight<S> &w1, const FSTWeight<S> &w2) {
   }
   if(w1.flags == FSTWeight<S>::isZero) {
     return w1; // zero / anything = 0
+  }
+  if(w1.flags == FSTWeight<S>::isNoWeight || w2.flags == FSTWeight<S>::isNoWeight) {
+    return FSTWeight<S>::NoWeight();
   }
   py::object o1 = w1.impl;
   if(w1.flags == FSTWeight<S>::isCount || w1.flags == FSTWeight<S>::isOne) {
@@ -460,6 +468,8 @@ FSTWeight<S> Power(const FSTWeight<S> &w1, int n) {
 template<uint64 S>
 bool operator==(FSTWeight<S> const &w1, FSTWeight<S> const &w2) {
   if(&w1 == &w2) return true;
+  if(w1.flags == FSTWeight<S>::isNoWeight || w2.flags == FSTWeight<S>::isNoWeight)
+    return w1.flags == FSTWeight<S>::isNoWeight && w2.flags == FSTWeight<S>::isNoWeight; // then this is invalid object, that should not be operated on
   py::object o1 = w1.impl;
   py::object o2 = w2.impl;
   if(w1.isBuiltIn() && !w2.isBuiltIn()) {
@@ -488,6 +498,8 @@ inline bool operator!=(FSTWeight<S> const &w1, FSTWeight<S> const &w2) {
 template<uint64 S>
 bool ApproxEqual(FSTWeight<S> const &w1, FSTWeight<S> const &w2, const float &delta) {
   if(&w1 == &w2) return true;
+  if(w1.flags == FSTWeight<S>::isNoWeight || w2.flags == FSTWeight<S>::isNoWeight)
+    return w1.flags == FSTWeight<S>::isNoWeight && w2.flags == FSTWeight<S>::isNoWeight; // then this is invalid object, that should not be operated on
   py::object o1 = w1.impl;
   py::object o2 = w2.impl;
   if(w1.isBuiltIn() && !w2.isBuiltIn()) {
@@ -746,7 +758,7 @@ void define_class(pybind11::module &m, const char *name) {
 
         unique_ptr<PyFST<S> > ret(new PyFST<S>());
 
-        const DeterminizeOptions<PyArc<S> > ops
+        DeterminizeOptions<PyArc<S> > ops
           (delta, weight_threshold,
            kNoStateId, 0,
            allow_non_functional ? DETERMINIZE_DISAMBIGUATE : DETERMINIZE_FUNCTIONAL,
@@ -908,6 +920,11 @@ void define_class(pybind11::module &m, const char *name) {
         RandGen(a, ret.get(), ops);
 
         return ret;
+      })
+
+    .def("Verify", [](const PyFST<S> &a) {
+        ErrorCatcher e;
+        return Verify(a);
       })
 
     .def("ArcList", [](const PyFST<S> &a, int64 state) {
