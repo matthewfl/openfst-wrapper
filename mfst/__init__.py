@@ -81,8 +81,7 @@ class AbstractSemiringWeight(object):
 
         Called from openFST
         """
-        print('not implemented _member')
-        raise NotImplementedError('_member')
+        return True
 
     def _quantize(self, delta=.5):
         """
@@ -753,7 +752,7 @@ class FST(object):
 
     def __str__(self):
         if self.num_states < 10 and sum(self.num_arcs(s) for s in range(self.num_states)) < 300:
-            # if the FST is small enough that we might want to print the whole thing in the string
+            # if the FST is small enough that we want to print the whole thing in the string
             return self.full_str()
         else:
             return 'FST(num_states={})'.format(self.num_states)
@@ -847,7 +846,7 @@ class FST(object):
         # if the machine is too big, do not attempt to make ipython display it
         # otherwise it ends up crashing and stuff...
         if len(ret) > 1200:
-            return f'<code>{str(self)}</code>'
+            return f'FST too large to draw graphic, use fst.full_str()<br /><code>FST(num_states={self.num_states})</code>'
 
 
         ret2 = ['''

@@ -591,6 +591,10 @@ public:
       scores.push_back(f);
     }
 
+    if(sum != sum) {  // check if the value is nan
+      throw fsterror("Overflow when computing _sampling_weight normalizer");
+    }
+
     uniform_real_distribution<double> uniform(0.0, 1.0);
     double U = sum * uniform(random_engine);
     for(size_t i = 0; i < scores.size(); i++) {
