@@ -103,7 +103,6 @@ bool check_is_weight(py::object &weight) {
     hasattr(weight, "__pow__") &&
     // need to check that this isn't null
     !getattr(weight, "__hash__").is_none() &&
-    //hasattr(weight, "__hash__") &&
     hasattr(weight, "__eq__") &&
     hasattr(weight, "_openfst_str") &&
     hasattr(weight, "_member") &&
@@ -746,10 +745,10 @@ void define_class(pybind11::module &m, const char *name) {
       })
 
     // methods that will generate a new FST or
-    .def("Concat", [](const PyFST<S> &a, PyFST<S> &b) {
+    .def("Concat", [](const PyFST<S> &a, const PyFST<S> &b) {
         ErrorCatcher e;
-        PyFST<S> *ret = b.Copy();
-        Concat(a, ret);
+        unique_ptr<PyFST<S> > ret(b.Copy());
+        Concat(a, ret.get());
         return ret;
       })
 
@@ -875,8 +874,6 @@ void define_class(pybind11::module &m, const char *name) {
     .def("ShortestDistance", [](const PyFST<S> &a, bool reverse) {
         ErrorCatcher e;
         vector<FSTWeight<S> > distances;
-
-        // TODO: same problem as shortest path
 
         ShortestDistance(a, &distances, reverse);
 

@@ -12,7 +12,6 @@ from random import randint as _randint
 ArcType = _namedtuple('Arc', ['input_label', 'output_label', 'nextstate', 'weight'])
 
 
-# rename this to semiring weight
 class AbstractSemiringWeight(object):
     """
     Defines the base class that all semirings should inherit from.
@@ -69,7 +68,8 @@ class AbstractSemiringWeight(object):
 
     def __pow__(self, n):
         """
-        Power of self for n is an int
+        Power of self
+        n is an int
         """
         print('not implemented __pow__')
         raise NotImplementedError('__pow__')
@@ -100,7 +100,7 @@ class AbstractSemiringWeight(object):
         """
         Return a positive unnormalized floating point value that can be used to sample this arc
 
-        Locally normallized outgoing from a particular state
+        Locally normalized outgoing from a particular state
         """
         print('not implemented _sampling_weight')
         raise NotImplementedError('_sampling_weight')
@@ -138,8 +138,10 @@ class AbstractSemiringWeight(object):
         return f'{type(self).__name__}({str(self)})'
 
 
-# plus times semiring weight over python objects
 class PythonValueSemiringWeight(AbstractSemiringWeight):
+    """
+    Plus times semiring weight over python objects
+    """
 
     def __init__(self, value=0):
         super().__init__()
@@ -172,7 +174,10 @@ class PythonValueSemiringWeight(AbstractSemiringWeight):
 
     def __div__(self, other):
         assert type(other) is type(self)
-        return self._create(self.value / other.value)
+        try:
+            return self._create(self.value / other.value)
+        except ZeroDivisionError:
+            return self._create(float('nan'))
 
     def __pow__(self, n):
         return self._create(self.value ** n)
@@ -325,7 +330,6 @@ class FST(object):
             mapper = self._string_mapper
         else:
             mapper = lambda x: x
-
 
         while state != -1:
             edges = list(self.get_arcs(state))
@@ -553,7 +557,7 @@ class FST(object):
         http://www.openfst.org/twiki/bin/view/FST/DifferenceDoc
         """
         self._check_same_fst(other)
-        assert self.constructor(self._fst.Difference(other._fst))
+        return self.constructor(self._fst.Difference(other._fst))
 
     def invert(self):
         """
