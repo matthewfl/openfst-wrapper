@@ -104,64 +104,67 @@ bool check_is_weight(py::object &weight) {
     // need to check that this isn't null
     !getattr(weight, "__hash__").is_none() &&
     hasattr(weight, "__eq__") &&
-    hasattr(weight, "_openfst_str") &&
-    hasattr(weight, "_member") &&
-    hasattr(weight, "_quantize") &&
-    hasattr(weight, "_reverse") &&
-    hasattr(weight, "_approx_eq") &&
-    hasattr(weight, "_sampling_weight") &&
+    hasattr(weight, "openfst_str") &&
+    hasattr(weight, "member") &&
+    hasattr(weight, "quantize") &&
+    hasattr(weight, "reverse") &&
+    hasattr(weight, "approx_eq") &&
+    hasattr(weight, "sampling_weight") &&
     hasattr(weight, "one") &&
     hasattr(weight, "zero");
 }
 
 
 // this is SUCH a HACK
-namespace {
-  static py::handle semiring_class;
-  static py::object one_cache;
-  static py::object zero_cache;
-}
 class StaticPythonWeights {
 private:
   //py::handle old;
+  py::handle semiring_class;
+  py::object one_cache;
+  py::object zero_cache;
+
+  static StaticPythonWeights *active;
+
 public:
   StaticPythonWeights(py::handle semiring) {
     if(!hasattr(semiring, "zero") || !hasattr(semiring, "one")) {
       throw fsterror("Semiring does not have zero and one method to construct new instances");
     }
     //old = semiring_class;
-    assert(semiring_class.ptr() == nullptr);
     semiring_class = semiring;
+    assert(active == nullptr);
+    active = this;
   }
   ~StaticPythonWeights() {
+    assert(active == this);
+    active = nullptr;
     semiring_class = nullptr;
     one_cache.release();
     zero_cache.release();
   }
 
   static bool contains() {
-    // if(semiring_class.ptr() != nullptr) {
-    //   py::object foo = semiring_class.attr("one")();
-    // }
-    //return false;
-    return semiring_class.ptr() != nullptr;
+    return active != nullptr && active->semiring_class.ptr() != nullptr;
   }
 
   static py::object One() {
     // should have already checked
-    if(one_cache.ptr() == nullptr) {
-      one_cache = semiring_class.attr("one")();
-    }
-    return one_cache;
+    //if(active->one_cache.ptr() == nullptr) {
+      active->one_cache = active->semiring_class.attr("one");
+      //}
+    return active->one_cache;
   }
 
   static py::object Zero() {
-    if(zero_cache.ptr() == nullptr) {
-      zero_cache = semiring_class.attr("zero")();
-    }
-    return zero_cache;
+    //if(active->zero_cache.ptr() == nullptr) {
+      active->zero_cache = active->semiring_class.attr("zero");
+      //}
+    return active->zero_cache;
   }
 };
+
+StaticPythonWeights* StaticPythonWeights::active = nullptr;
+
 
 template<uint64 S>
 class FSTWeight {
@@ -187,6 +190,7 @@ public:
   }
 
   FSTWeight(uint32 count) : flags(isCount), count(count) {
+    throw fsterror("don't use the counting weights on the fst");
     assert(count > 0);
     if(count  == 0)
       throw fsterror("Invalid static count");
@@ -199,16 +203,16 @@ public:
 
   static FSTWeight<S> Zero() {
     static const FSTWeight<S> zero = FSTWeight<S>(isZero, true);
-    if(StaticPythonWeights::contains()) {
-      return FSTWeight<S>(StaticPythonWeights::Zero());
-    }
+    // if(StaticPythonWeights::contains()) {
+    //   return FSTWeight<S>(StaticPythonWeights::Zero());
+    // }
     return zero;
   }
   static FSTWeight<S> One() {
     static const FSTWeight<S> one = FSTWeight<S>(isOne, true);
-    if(StaticPythonWeights::contains()) {
-      return FSTWeight<S>(StaticPythonWeights::One());
-    }
+    // if(StaticPythonWeights::contains()) {
+    //   return FSTWeight<S>(StaticPythonWeights::One());
+    // }
     return one;
   }
   static const FSTWeight<S>& NoWeight() {
@@ -238,7 +242,7 @@ public:
       return (flags & (isOne | isZero | isCount)) != 0;
     } else {
       assert(flags == isSet);
-      py::object r = impl.attr("_member")();
+      py::object r = impl.attr("member")();
       return r.cast<bool>();
     }
   }
@@ -248,7 +252,7 @@ public:
       // TODO: this should print a warning or something
       return *this;
     } else {
-      py::object r = impl.attr("_reverse")();
+      py::object r = impl.attr("reverse")();
       return FSTWeight<S>(r);
     }
   }
@@ -257,7 +261,7 @@ public:
     if(isBuiltIn()) {
       return *this;
     } else {
-      py::object r = impl.attr("_quantize")(delta);
+      py::object r = impl.attr("quantize")(delta);
       return FSTWeight<S>(r);
     }
   }
@@ -277,7 +281,7 @@ public:
     } else {
       // it appears that openfst uses this string inside of its determinize and disambiguate
       // if there are minor non matching floating point errors then openfst breaks
-      py::object s = impl.attr("_openfst_str")();
+      py::object s = impl.attr("openfst_str")();
       return os << s.cast<string>();
     }
   }
@@ -325,16 +329,16 @@ public:
     if(flags == isSet) {
       return impl;
     } else if(flags == isOne) {
-      return other.attr("one")();
+      return other.attr("one");
     } else if(flags == isZero) {
-      return other.attr("zero")();
+      return other.attr("zero");
     } else if(flags == isNoWeight) {
       // unsure what could be done here
       return py::cast("__FST_INVALID__");
     } else {
       assert(flags == isCount);
-      py::object ret = other.attr("zero")(); // get the zero element
-      py::object v = other.attr("one")();
+      py::object ret = other.attr("zero"); // get the zero element
+      py::object v = other.attr("one");
       if(!check_is_weight(ret) || !check_is_weight(v))
         throw fsterror("Operation return non weight");
       uint32 i = count;
@@ -372,8 +376,9 @@ FSTWeight<S> Plus(const FSTWeight<S> &w1, const FSTWeight<S> &w2) {
     return w1;
   }
   if(w1.flags == FSTWeight<S>::isOne || w2.flags == FSTWeight<S>::isOne) {
-    return FSTWeight<S>(2); // the counting element
-    //throw fsterror("Trying to add with the static semiring one");
+    //return FSTWeight<S>(2); // the counting element
+    // TODO: remove the counting weights from the semirings as they are awkward and a bad idea..
+    throw fsterror("Trying to add with the static semiring one");
   }
   py::object o1 = w1.impl;
   if(w1.flags != FSTWeight<S>::isSet) {
@@ -514,7 +519,7 @@ bool ApproxEqual(FSTWeight<S> const &w1, FSTWeight<S> const &w2, const float &de
   // this is the same underlying python object, these should return equal
   if(o1.ptr() == o2.ptr()) return true;
 
-  py::object r = o1.attr("_approx_eq")(o2, delta);
+  py::object r = o1.attr("approx_eq")(o2, delta);
   return r.cast<bool>();
 }
 
@@ -566,10 +571,10 @@ public:
         scores.push_back(0);
       } else {
         py::object o = w.PythonObject();
-        py::object r = o.attr("_sampling_weight")();
+        py::object r = o.attr("sampling_weight")();
         double f = r.cast<double>();
         if(f < 0) {
-          throw fsterror("_sampling_weight on edge must be >= 0");
+          throw fsterror("sampling_weight on edge must be >= 0");
         }
         sum += f;
         scores.push_back(f);
@@ -584,7 +589,7 @@ public:
         throw fsterror("Unable to sample from fst that contains static but not zero weights");
       }
       py::object o = w.PythonObject();
-      py::object r = o.attr("_sampling_weight")();
+      py::object r = o.attr("sampling_weight")();
       double f = r.cast<double>();
       sum += f;
       scores.push_back(f);
@@ -668,6 +673,7 @@ py::object final_weight(PyFST<S> &self, int64 state) {
 template<uint64 S>
 unique_ptr<PyFST<S> > compose(const PyFST<S> & a, const vector<const PyFST<S>*> args) {
   ErrorCatcher e;
+
   unique_ptr<PyFST<S> > ret (new PyFST<S>());
   // we have to sort the arcs such that this can be compared between objects
   IOLabelCompare<PyArc<S> > comp;

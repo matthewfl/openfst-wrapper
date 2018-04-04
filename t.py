@@ -29,7 +29,7 @@ class MyWeight(mfst.AbstractSemiringWeight):
         print('hi from hash')
         return hash(self._value)
 
-    def _approx_eq(self, other, delta):
+    def approx_eq(self, other, delta):
         print('hi from approx eq')
         return self == other
 
@@ -41,6 +41,10 @@ class MyWeight(mfst.AbstractSemiringWeight):
     def __str__(self):
         print('calling string')#, type(self), dir(self))
         return 'MyWeight({})'.format(self._value)
+
+MyWeight.zero = MyWeight(0)
+MyWeight.one = MyWeight(1)
+
 
 gg = mfst.FST(MyWeight)
 
@@ -75,7 +79,7 @@ a = None
 vv = None
 gg = None
 
-assert num_weights == 0 # check that everything got deleted
+assert num_weights == 2 # check that everything got deleted (except the zero and 1 static)
 
 
 gg = mfst.FST()
@@ -104,10 +108,17 @@ def build_hc_fst(fst, n=3):
     fst.add_arc(c[-1], final)
     fst.add_arc(h[-1], final)
 
-class pathSemiring(mfst.PythonValueSemiringWeight):
+class pathSemiring2(mfst.PythonValueSemiringWeight):
     semiring_properties = 'path'
 
-hc = mfst.FST(pathSemiring)
+pathSemiring2.zero = pathSemiring2(0)
+pathSemiring2.one = pathSemiring2(1)
+pathSemiring2.one.zzz = 1
+pathSemiring2.zero.zzz = 1
+
+
+
+hc = mfst.FST(pathSemiring2)
 build_hc_fst(hc)
 print(hc.determinize())
 
@@ -131,5 +142,21 @@ fst.random_path()
 f1.num_arcs(0)
 
 assert hc.shortest_path().num_states > 0
+
+
+# check that we can use the other semirings that are defined in
+
+from mfst import semirings
+
+for s in dir(semirings):
+    if s.startswith('_') or s == 'AbstractSemiringWeight':
+        continue
+    ss = getattr(semirings, s)
+
+    fst = mfst.FST(ss)
+    build_hc_fst(fst)
+    fst.determinize()  # just do some operation to check that the semiring seems ok
+
+
 
 print('done')

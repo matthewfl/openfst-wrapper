@@ -18,25 +18,19 @@ class AbstractSemiringWeight(object):
 
 
     Attributes:
-        semiring_type: {'base', 'path'} defines which properties this semiring has as this will construct a different backing FST
+        semiring_properties: {'base', 'path'} defines which properties this semiring has as this will construct a different backing FST
     """
-
-    # The properties of this semiring, will be used when constructing a new FST
     semiring_properties = 'base'
 
-    @classmethod
-    def zero(cls):
-        """
-        Returns the zero element of the semiring
-        """
-        return cls(0)
+    """
+    The zero element of the semiring
+    """
+    zero = None
 
-    @classmethod
-    def one(cls):
-        """
-        Returns the one element of the semiring
-        """
-        return cls(1)
+    """
+    The one element of the semiring
+    """
+    one = None
 
     def __add__(self, other):
         """
@@ -74,7 +68,7 @@ class AbstractSemiringWeight(object):
         print('not implemented __pow__')
         raise NotImplementedError('__pow__')
 
-    def _member(self):
+    def member(self):
         """
         Checks if the current instance is a member of the semiring
         (Eg float is not nan)
@@ -83,20 +77,20 @@ class AbstractSemiringWeight(object):
         """
         return True
 
-    def _quantize(self, delta=.5):
+    def quantize(self, delta=.5):
         """
         Return a new instance that is bucketed
         """
         print('not implemented _quantize')
         raise NotImplementedError('_quantize')
 
-    def _reverse(self):
+    def reverse(self):
         """
         Return a weight that represent reversing this edge
         """
         return self
 
-    def _sampling_weight(self):
+    def sampling_weight(self):
         """
         Return a positive unnormalized floating point value that can be used to sample this arc
 
@@ -105,7 +99,7 @@ class AbstractSemiringWeight(object):
         print('not implemented _sampling_weight')
         raise NotImplementedError('_sampling_weight')
 
-    def _approx_eq(self, other, delta):
+    def approx_eq(self, other, delta):
         """
         Returns if this weight is approximately equal to another other less than delta
         """
@@ -131,84 +125,27 @@ class AbstractSemiringWeight(object):
     def __truediv__(self, other):
         return self.__div__(other)
 
-    def _openfst_str(self):
+    def openfst_str(self):
+        """
+        Returns a string that is used by OpenFST when performing ToString operations
+        """
         return str(self)
 
     def __repr__(self):
+        """
+        A representation for printing on the command line
+        """
         return f'{type(self).__name__}({str(self)})'
 
 
-class PythonValueSemiringWeight(AbstractSemiringWeight):
-    """
-    Plus times semiring weight over python objects
-    """
-
-    def __init__(self, value=0):
-        super().__init__()
-        # the value should be immutable, so access via property
-        self.__value = value
-
-    @property
-    def value(self):
-        return self.__value
-
-    @classmethod
-    def _create(cls, v):
-        return cls(v)
-
-    @classmethod
-    def zero(cls):
-        return cls(0)
-
-    @classmethod
-    def one(cls):
-        return cls(1)
-
-    def __add__(self, other):
-        assert type(other) is type(self)
-        return self._create(self.value + other.value)
-
-    def __mul__(self, other):
-        assert type(other) is type(self)
-        return self._create(self.value * other.value)
-
-    def __div__(self, other):
-        assert type(other) is type(self)
-        try:
-            return self._create(self.value / other.value)
-        except ZeroDivisionError:
-            return self._create(float('nan'))
-
-    def __pow__(self, n):
-        return self._create(self.value ** n)
-
-    def _member(self):
-        # check that this is a member of the semiring
-        # this is just a nan check atm
-        return self.value == self.value
-
-    def _quantize(self, delta=.5):
-        # quantize the weight into buckets
-        return self
-
-    def _sampling_weight(self):
-        # just make the sampling of these path weights uniform
-        return 1
-
-    def _approx_eq(self, other, delta):
-        return abs(self.value - other.value) < delta
-
-    def __str__(self):
-        return str(self.value)
-
-    def __hash__(self):
-        return hash(self.value)
-
-    def __eq__(self, other):
-        return isinstance(other, PythonValueSemiringWeight) and self.value == other.value
-
-    def __repr__(self):
-        return f'{type(self).__name__}({self.value})'
+from . import semirings
+from .semirings import (
+    PythonValueSemiringWeight,  # semiring for general python values
+    RealSemiringWeight,         # Standard <+,*> semiring for real valued scalars
+    MinPlusSemiringWeight,      # <min, +> semiring with real value scalars
+    MaxPlusSemiringWeight,      # <max, +> semiring with real value scalars
+    TropicalSemiringWeight,     # <min, +> semiring with real value scalars
+)
 
 
 class FST(object):
@@ -218,18 +155,22 @@ class FST(object):
 
     def __init__(self, semiring_class=None, acceptor=False, string_mapper=None, _fst=None):
         if not semiring_class:
-            self._semiring_class = PythonValueSemiringWeight
+            semiring_class = PythonValueSemiringWeight
         else:
-            # quick sanity check that this implements the semiring class
             assert issubclass(semiring_class, AbstractSemiringWeight)
-            zero = semiring_class.zero()
-            one = semiring_class.one()
-            assert isinstance(zero, semiring_class)
-            assert isinstance(one, semiring_class)
-            assert isinstance(zero + one, semiring_class)
-            assert isinstance(zero * one, semiring_class)
 
-            self._semiring_class = semiring_class
+        # quick sanity check that this implements the semiring class
+        zero = semiring_class.zero
+        one = semiring_class.one
+        assert zero is not None and isinstance(zero, semiring_class), "Zero weight not set for semiring"
+        assert one  is not None and isinstance(one , semiring_class), "One weight not set for semiring"
+
+        assert isinstance(zero, semiring_class)
+        assert isinstance(one , semiring_class)
+        assert isinstance(zero + one, semiring_class)
+        assert isinstance(zero * one, semiring_class)
+
+        self._semiring_class = semiring_class
 
         if _fst:
             self._fst = _fst
@@ -259,9 +200,9 @@ class FST(object):
             if w == '__FST_INVALID__':
                 return None
             elif w == '__FST_ONE__':
-                return self._semiring_class.one()
+                return self._semiring_class.one
             elif w == '__FST_ZERO__':
-                return self._semiring_class.zero()
+                return self._semiring_class.zero
         return self._semiring_class(w)
 
     def _check_same_fst(self, other):
@@ -288,12 +229,12 @@ class FST(object):
     @property
     def semiring_one(self):
         """Return the semiring's one element"""
-        return self._semiring_class.one()
+        return self._semiring_class.one
 
     @property
     def semiring_zero(self):
         """Return the semiring's zero element"""
-        return self._semiring_class.zero()
+        return self._semiring_class.zero
 
     @property
     def semiring(self):
@@ -515,7 +456,7 @@ class FST(object):
           will be used and the longer path discarded.
         """
         if weight_threshold is None:
-            weight_threshold = self._semiring_class()
+            weight_threshold = self._semiring_class.zero
 
         return self.constructor(self._fst.Determinize(
             self._semiring_class,
@@ -944,30 +885,3 @@ class FST(object):
         </script>
         ''')
         return ''.join(ret2)
-
-
-try:
-    # use numpy to define the real values in the case that we can import it
-    from numpy import isreal as _isreal, isscalar as _isscalar
-
-    def _is_real(x):
-        return _isreal(x) and _isscalar(x)
-except ImportError:
-    def _is_real(x):
-        return isinstance(x, (int, float))
-
-
-class RealSemiringWeight(PythonValueSemiringWeight):
-    """
-    The standard <+,*> semiring
-    """
-
-    def __init__(self, v):
-        assert _is_real(v), f"Value {v} is not a real number"
-        super().__init__(v)
-
-    def __float__(self):
-        return float(self.value)
-
-    def __int__(self):
-        return int(self.value)
