@@ -55,7 +55,7 @@ for i in range(9):
 for i in range(5):
     gg.add_arc(i, i+1, weight=MyWeight(i))
 
-gg.start_state = 0
+gg.initial_state = 0
 gg.set_final_weight(3, MyWeight(1))
 
 print("before final")
@@ -85,7 +85,7 @@ assert num_weights == 2 # check that everything got deleted (except the zero and
 gg = mfst.FST()
 sf = gg.create_from_string('test')
 print(sf)
-assert sf.get_unique_lower_string() == 'test'
+assert sf.get_unique_output_string() == 'test'
 
 assert sf._repr_html_() is not None
 print(sf._repr_html_())
@@ -93,7 +93,7 @@ print(sf._repr_html_())
 
 def build_hc_fst(fst, n=3):
     start = fst.add_state()
-    fst.start_state = start
+    fst.initial_state = start
     h = [fst.add_state() for i in range(n)]
     c = [fst.add_state() for i in range(n)]
     fst.add_arc(start, h[0], input_label='H')

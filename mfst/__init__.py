@@ -96,15 +96,15 @@ class AbstractSemiringWeight(object):
 
         Locally normalized outgoing from a particular state
         """
-        print('not implemented _sampling_weight')
-        raise NotImplementedError('_sampling_weight')
+        print('not implemented sampling_weight')
+        raise NotImplementedError('sampling_weight')
 
     def approx_eq(self, other, delta):
         """
         Returns if this weight is approximately equal to another other less than delta
         """
-        print('not implemented _approx_eq')
-        raise NotImplementedError('_approx_eq')
+        print('not implemented approx_eq')
+        raise NotImplementedError('approx_eq')
 
     def __hash__(self):  # hash is required if defining __eq__
         """
@@ -248,7 +248,7 @@ class FST(object):
         """
         ret = self.constructor(acceptor=True)
         last = ret.add_state()
-        ret.start_state = last
+        ret.initial_state = last
         for s in string:  # string can be any iterable object, eg (a normal string or a tuple of ints)
             state = ret.add_state()
             ret.add_arc(last, state, output_label=s, input_label=s)
@@ -257,13 +257,13 @@ class FST(object):
             ret.set_final_weight(last)
         return ret
 
-    def get_unique_lower_string(self, characters=False, integers=False):
+    def get_unique_output_string(self):
         """
         Returns the string representation in the case that there is only a single path in the fst
         """
         if self.num_states == 0:
             return None  # this is an empty FST
-        state = self.start_state
+        state = self.initial_state
         seen = set()
         ret = []
 
@@ -308,22 +308,22 @@ class FST(object):
         return self._fst.NumArcs(state)
 
     @property
-    def start_state(self):
+    def initial_state(self):
         """
         Return the state id of the starting state
         """
         return self._fst.Start()
 
-    @start_state.setter
-    def start_state(self, state):
+    @initial_state.setter
+    def initial_state(self, state):
         """
         Mark a state as the start state
         """
         assert (state >= 0 and state < self.num_states), "Invalid state id"
         return self._fst.SetStart(state)
 
-    def set_start_state(self, state):
-        self.start_state = state
+    def set_initial_state(self, state):
+        self.initial_state = state
 
     def add_state(self):
         """
@@ -352,7 +352,10 @@ class FST(object):
                 self._string_mapper = chr
         if self._acceptor:
             # acceptors are machines with the same input and output label
-            output_label = input_label
+            if output_label == 0:  # if not set just copy the value
+                output_label = input_label
+            else:
+                assert output_label == input_label, "a FSA requires that the input and output labels are equal on all arcs"
         return self._fst.AddArc(from_state, to_state, input_label, output_label,
                                 self._make_weight(weight))
 
@@ -683,7 +686,7 @@ class FST(object):
                                     weight=w,
                                     input_label=arc.input_label,
                                     output_label=arc.output_label)
-        ret.start_state = self.start_state
+        ret.initial_state = self.initial_state
         return ret
 
     def verify(self):
@@ -784,9 +787,9 @@ class FST(object):
                 label = '\n'.join(values)
                 ret.append(f'g.setEdge("state_{sid}", "state_{dest}", {{ arrowhead: "vee", label: {json.dumps(label)} }});\n')
 
-        if self.start_state >= 0:
+        if self.initial_state >= 0:
             # make the start state green
-            ret.append(f'g.node("state_{self.start_state}").style = "fill: #7f7"; \n')
+            ret.append(f'g.node("state_{self.initial_state}").style = "fill: #7f7"; \n')
 
         # if the machine is too big, do not attempt to make ipython display it
         # otherwise it ends up crashing and stuff...
