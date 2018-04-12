@@ -77,7 +77,7 @@ class PythonValueSemiringWeight(AbstractSemiringWeight):
         return f'{type(self).__name__}({self.value})'
 
 # static semiring zero and one elements
-PythonValueSemiringWeight.zero = PythonValueSemiringWeight(1)
+PythonValueSemiringWeight.zero = PythonValueSemiringWeight(0)
 PythonValueSemiringWeight.one = PythonValueSemiringWeight(1)
 
 
