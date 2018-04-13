@@ -545,7 +545,7 @@ class FST(object):
         self._check_same_fst(other)
         return self.constructor(self._fst.Intersect(other._fst))
 
-    def push(self, towards='final'):
+    def push(self, towards='initial'):
         """
         This operation produces an equivalent transducer by pushing the weights
         and/or the labels towards the initial state or toward the final states.
@@ -729,22 +729,26 @@ class FST(object):
         # sigh...loading these as external files
         # ipython is loading with require js
 
-
         # here we are actually going to read the states from the FST and generate nodes for them
         # in the output source code
         zero = self._make_weight('__FST_ZERO__')
+        one = self._make_weight('__FST_ONE__')
+        initial_state = self.initial_state
 
         for sid in range(self.num_states):
             finalW = ''
+            is_final = False
             ww = self._fst.FinalWeight(sid)
             if ww and not isinstance(ww, str) or '__FST_ZERO__' != ww:  # look at the raw returned value to see if it is zero (unset)
                 ww = self._make_weight(ww)
                 if ww and zero != ww:
-                    finalW = f'\n({ww})'
+                    is_final = True
+                    if not (one == ww and sid != initial_state):
+                        finalW = f'\n({ww})'
             label = f'{sid}{finalW}'
 
-            ret.append( f'g.setNode("state_{sid}", {{ label: {json.dumps(label)} , shape: "circle" }});\n')
-            if finalW:
+            ret.append(f'g.setNode("state_{sid}", {{ label: {json.dumps(label)} , shape: "circle" }});\n')
+            if is_final:
                 # make the final states red
                 ret.append(f'g.node("state_{sid}").style = "fill: #f77"; \n')
 
@@ -779,7 +783,8 @@ class FST(object):
                         label += '\u03B5'
                     else:
                         label += make_label(arc.output_label)
-                label += f'/{arc.weight}'
+                if one != arc.weight:
+                    label += f'/{arc.weight}'
                 to[arc.nextstate].append(label)
             for dest, values in to.items():
                 if len(values) > 3:
@@ -787,7 +792,7 @@ class FST(object):
                 label = '\n'.join(values)
                 ret.append(f'g.setEdge("state_{sid}", "state_{dest}", {{ arrowhead: "vee", label: {json.dumps(label)} }});\n')
 
-        if self.initial_state >= 0:
+        if initial_state >= 0:
             # make the start state green
             ret.append(f'g.node("state_{self.initial_state}").style = "fill: #7f7"; \n')
 
