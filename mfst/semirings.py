@@ -130,6 +130,9 @@ class MinPlusSemiringWeight(RealSemiringWeight):
         # self (/) other
         return self._create(self.value - other.value)
 
+    def __bool__(self):
+        return self.value < float('inf')
+
 # static semiring zero and one elements
 MinPlusSemiringWeight.zero = MinPlusSemiringWeight(float('inf'))
 MinPlusSemiringWeight.one = MinPlusSemiringWeight(0)
@@ -157,6 +160,10 @@ class MaxPlusSemiringWeight(RealSemiringWeight):
     def __div__(self, other):
         # self (/) other
         return self._create(self.value - other.value)
+
+
+    def __bool__(self):
+        return self.value > float('-inf')
 
 # static semiring zero and one elements
 MaxPlusSemiringWeight.zero = MaxPlusSemiringWeight(float('-inf'))

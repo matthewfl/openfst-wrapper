@@ -739,9 +739,9 @@ class FST(object):
             finalW = ''
             is_final = False
             ww = self._fst.FinalWeight(sid)
-            if ww and not isinstance(ww, str) or '__FST_ZERO__' != ww:  # look at the raw returned value to see if it is zero (unset)
+            if ww is not None and (not isinstance(ww, str) or '__FST_ONE__' == ww):  # look at the raw returned value to see if it is zero (unset)
                 ww = self._make_weight(ww)
-                if ww and zero != ww:
+                if zero != ww:
                     is_final = True
                     if not (one == ww and sid != initial_state):
                         finalW = f'\n({ww})'
