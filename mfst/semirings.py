@@ -1,4 +1,5 @@
 from . import AbstractSemiringWeight
+from math import exp as _exp
 
 try:
     # use numpy to define the real values in the case that we can import it
@@ -93,6 +94,10 @@ class RealSemiringWeight(PythonValueSemiringWeight):
     def quantize(self, delta=1.0 / 1024):
         return self._create(int(self.value / delta) * delta)
 
+    def sampling_weight(self):
+        assert self.value >= 0, "Value on semiring when sampling a path must be >= 0"
+        return self.value
+
     def __float__(self):
         return float(self.value)
 
@@ -161,7 +166,6 @@ class MaxPlusSemiringWeight(RealSemiringWeight):
         # self (/) other
         return self._create(self.value - other.value)
 
-
     def __bool__(self):
         return self.value > float('-inf')
 
@@ -172,7 +176,8 @@ MaxPlusSemiringWeight.one = MaxPlusSemiringWeight(0)
 
 class TropicalSemiringWeight(MinPlusSemiringWeight):
 
-    pass
+    def sampling_weight(self):
+        return _exp(-self.value)
 
 # static semiring zero and one elements
 TropicalSemiringWeight.zero = TropicalSemiringWeight(float('inf'))

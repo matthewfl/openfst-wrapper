@@ -596,7 +596,7 @@ public:
     }
 
     if(sum != sum) {  // check if the value is nan
-      throw fsterror("Overflow when computing _sampling_weight normalizer");
+      throw fsterror("Overflow when computing sampling_weight normalizer");
     }
 
     uniform_real_distribution<double> uniform(0.0, 1.0);
@@ -923,7 +923,7 @@ void define_class(pybind11::module &m, const char *name) {
         // unsure how having the count as the weight will work?  The output semiring is potentially the same as this one??
         // but we could get the counts back??
         // maybe we should just wrap the FST with the value class instead of having the customized seminring?
-        RandGenOptions<PythonArcSelector<S> > ops(selector, std::numeric_limits<int32>::max(), count, true);
+        RandGenOptions<PythonArcSelector<S> > ops(selector, std::numeric_limits<int32>::max(), count, false /* don't use weighted, as this would just return an fst with the prob of the path */);
         RandGen(a, ret.get(), ops);
 
         return ret;

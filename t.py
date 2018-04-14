@@ -122,6 +122,7 @@ hc = mfst.FST(pathSemiring2)
 build_hc_fst(hc)
 print(hc.determinize())
 
+hc.random_path()
 
 fst = mfst.FST()
 f1 = fst.create_from_string('hello')
