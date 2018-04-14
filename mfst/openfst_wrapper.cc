@@ -375,9 +375,15 @@ FSTWeight<S> Plus(const FSTWeight<S> &w1, const FSTWeight<S> &w2) {
   if(w2.flags == FSTWeight<S>::isZero) {
     return w1;
   }
-  if(w1.flags == FSTWeight<S>::isOne || w2.flags == FSTWeight<S>::isOne) {
+  if(w1.flags == FSTWeight<S>::isOne && w2.flags == FSTWeight<S>::isOne) {
     //return FSTWeight<S>(2); // the counting element
     // TODO: remove the counting weights from the semirings as they are awkward and a bad idea..
+    if(StaticPythonWeights::contains()) {
+      // this can just return the two object
+      py::object one = StaticPythonWeights::One();
+      py::object r = one.attr("__add__")(one);
+      return FSTWeight<S>(r);
+    }
     throw fsterror("Trying to add with the static semiring one");
   }
   py::object o1 = w1.impl;
@@ -386,7 +392,9 @@ FSTWeight<S> Plus(const FSTWeight<S> &w1, const FSTWeight<S> &w2) {
       return FSTWeight<S>(w1.count + w2.count);
     } else if(w2.flags == FSTWeight<S>::isSet) {
       o1 = w1.buildObject(w2.impl);
-    } else {
+    } else if(StaticPythonWeights::contains() && w1.flags == FSTWeight<S>::isOne) {
+      o1 = StaticPythonWeights::One();
+    }else {
       throw fsterror("Undefined addition between two static elements of the field");
     }
   }
