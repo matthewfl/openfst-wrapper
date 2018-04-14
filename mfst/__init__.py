@@ -864,7 +864,7 @@ class FST(object):
         dagreD3 = require('dagreD3');
         } catch (e) { setTimeout(render_d3, 50); return; } // requirejs is broken on external domains
         //alert("loaded");
-        var g = new dagreD3.graphlib.Graph().setGraph({});
+        var g = new dagreD3.graphlib.Graph().setGraph({ 'rankdir': 'LR' });
         ''')
         ret2.append(''.join(ret))
 
