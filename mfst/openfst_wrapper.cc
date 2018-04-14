@@ -51,6 +51,7 @@
 #include <fst/topsort.h>
 #include <fst/disambiguate.h>
 #include <fst/verify.h>
+#include <fst/closure.h>
 
 #include <fst/script/print.h>
 
@@ -940,6 +941,13 @@ void define_class(pybind11::module &m, const char *name) {
     .def("Verify", [](const PyFST<S> &a) {
         ErrorCatcher e;
         return Verify(a);
+      })
+
+    .def("Closure", [](const PyFST<S> &a, int mode) {
+        ErrorCatcher e;
+        unique_ptr<PyFST<S> > ret(a.Copy());
+        Closure(ret.get(), mode == 0 ? CLOSURE_STAR : CLOSURE_PLUS);
+        return ret;
       })
 
     .def("ArcList", [](const PyFST<S> &a, int64 state) {

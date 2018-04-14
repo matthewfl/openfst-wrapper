@@ -698,6 +698,22 @@ class FST(object):
         """
         return self._fst.Verify()
 
+    def closure(self, mode='star'):
+        """
+        This operation computes the concatenative closure. If A transduces string x
+        to y with weight a, then the closure transduces x to y with weight a, xx
+        to yy with weight a (otimes) a, xxx to yyy with weight a (otimes) a
+        (otimes) a, etc. If closure_type is CLOSURE_STAR, then the empty string
+        is transduced to itself with weight 1 as well.
+        """
+        if mode == 'star':
+            t = 0
+        elif mode == 'plus':
+            t = 1
+        else:
+            raise RuntimeError('closure expects mode of star or plus')
+        return self.constructor(self._fst.Closure(t))
+
     def __str__(self):
         if self.num_states < 10 and sum(self.num_arcs(s) for s in range(self.num_states)) < 300:
             # if the FST is small enough that we want to print the whole thing in the string
