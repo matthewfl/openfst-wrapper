@@ -166,6 +166,7 @@ bs = mfst.FST(semirings.BooleanSemiringWeight).create_from_string('test123').pus
 
 assert mfst.FST().create_from_string('test123').compose(bs).get_unique_output_string() == 'test123'
 
+mfst.FST('test')
 
 
 print('done')

@@ -158,17 +158,19 @@ class FST(object):
     """
 
     def __init__(self, semiring_class=None, acceptor=False, string_mapper=None, _fst=None):
-        if isinstance(semiring_class, str):
+        if semiring_class is None:
+            semiring_class = PythonValueSemiringWeight
+        elif type(semiring_class) is not type:
+            assert hasattr(semiring_class, '__iter__'), "first argument is not iterable or a semiring class"
             # handle special case where we are dealing with a string construction
             # just build a BooleanFST that can be composed with other machines
-            _fst = FST(BooleanSemiringWeight).create_from_string(semiring_class)._fst
+            f = FST(BooleanSemiringWeight).create_from_string(semiring_class)
+            _fst = f._fst
             semiring_class = BooleanSemiringWeight
             acceptor = True
-            string_mapper = chr
-        elif not semiring_class:
-            semiring_class = PythonValueSemiringWeight
+            string_mapper = f._string_mapper
         else:
-            assert issubclass(semiring_class, AbstractSemiringWeight)
+            assert issubclass(semiring_class, AbstractSemiringWeight), "first argument is not iterable or a semiring class"
 
         # quick sanity check that this implements the semiring class
         zero = semiring_class.zero
