@@ -709,11 +709,11 @@ class FST(object):
                     if arc.weight != zero:  # some openfst algorithms add zero weights to the final edge (like determinize)
                         # then this is a final state
                         w = converter(arc.weight)
-                        if w:
+                        if w is not None:
                             ret.set_final_weight(i, weight=w)
                 else:
                     w = converter(arc.weight)
-                    if w:
+                    if w is not None:
                         ret.add_arc(i, arc.nextstate,
                                     weight=w,
                                     input_label=arc.input_label,
