@@ -138,6 +138,8 @@ class AbstractSemiringWeight(object):
         """
         return f'{type(self).__name__}({str(self)})'
 
+    def __bool__(self):
+        return not (self == self.zero)
 
 from . import semirings
 from .semirings import (
