@@ -264,8 +264,7 @@ class FST(object):
             state = ret.add_state()
             ret.add_arc(last, state, output_label=s, input_label=s)
             last = state
-        if last:
-            ret.set_final_weight(last)
+        ret.set_final_weight(last)
         return ret
 
     def get_unique_output_string(self):
@@ -778,7 +777,7 @@ class FST(object):
                 return tuple([self._string_mapper(y) for y in x])
 
         # run BFS
-        queue = [(tuple(), tuple(), zero, start)]
+        queue = [(tuple(), tuple(), self.semiring_one, start)]
 
         while len(queue) > 0:
             input_path, output_path, sweight, state = queue.pop(0)
@@ -786,7 +785,7 @@ class FST(object):
                 if zero != weight:
                     if nextstate == -1:
                         # this is a final state
-                        yield PathType(mapper(input_path), mapper(output_path), sweight + weight)
+                        yield PathType(mapper(input_path), mapper(output_path), sweight * weight)
                     else:
                         ip = input_path
                         op = output_path
@@ -796,7 +795,7 @@ class FST(object):
                             op += (output_label,)
                         queue.append((
                             ip, op,
-                            sweight + weight,
+                            sweight * weight,
                             nextstate
                         ))
 
