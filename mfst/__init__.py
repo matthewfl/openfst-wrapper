@@ -145,6 +145,7 @@ from .semirings import (
     MinPlusSemiringWeight,      # <min, +> semiring with real value scalars
     MaxPlusSemiringWeight,      # <max, +> semiring with real value scalars
     TropicalSemiringWeight,     # <min, +> semiring with real value scalars
+    BooleanSemiringWeight,      # <or, and> semiring for boolean values (special handling by compose and lift)
 )
 
 
@@ -436,11 +437,24 @@ class FST(object):
         Will efficiently handle one or more FSTs composing self :: arg1 :: arg2 :: .... :: argN
         """
         assert len(other_fsts) > 0, "Require at least one other FST to compose with"
-        for fst in other_fsts:
-            self._check_same_fst(fst)
-        return self.constructor(
-            self._fst.Compose([f._fst for f in other_fsts]),
-            acceptor=self._acceptor and all([f._acceptor for f in other_fsts])
+        # deal with the case that there may be a boolean semiring in which case we want to
+        # convert this into the other semiring that we are using
+        fsts = [self] + list(other_fsts)
+        target_semiring = None
+        for fst in fsts:
+            target_semiring = fst.semiring
+            if target_semiring is not BooleanSemiringWeight:
+                break
+        if target_semiring is not BooleanSemiringWeight:
+            fsts = [f if f.semiring is not BooleanSemiringWeight else
+                    f.determinize().lift(target_semiring)
+                    for f in fsts]
+        s, *others = fsts
+        for fst in others:
+            s._check_same_fst(fst)
+        return s.constructor(
+            s._fst.Compose([f._fst for f in others]),
+            acceptor=all([f._acceptor for f in fsts])
         )
 
     def determinize(self, delta=1.0/1024, weight_threshold=None, *, allow_non_functional=False):
@@ -666,7 +680,11 @@ class FST(object):
         if not semiring:
             semiring = self._semiring_class
         if not converter:
-            converter = lambda x: x
+            if self._semiring_class is BooleanSemiringWeight:
+                converter = lambda x: semiring.one if x else semiring.zero
+            else:
+                converter = lambda x: x
+
         ret = FST(semiring, acceptor=self._acceptor, string_mapper=self._string_mapper)
         zero = self.semiring_zero
         for i in range(self.num_states):

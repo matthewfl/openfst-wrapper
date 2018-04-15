@@ -158,7 +158,14 @@ for s in dir(semirings):
     build_hc_fst(fst)
     fst.determinize()  # just do some operation to check that the semiring seems ok
 
-mfst.FST(semirings.BooleanSemiringWeight).create_from_string('test123').push()
+
+
+
+# tests for the boolean semiring in that we can compose it with something else
+bs = mfst.FST(semirings.BooleanSemiringWeight).create_from_string('test123').push()
+
+assert mfst.FST().create_from_string('test123').compose(bs).get_unique_output_string() == 'test123'
+
 
 
 print('done')
