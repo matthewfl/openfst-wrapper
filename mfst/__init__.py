@@ -10,6 +10,7 @@ from random import randint as _randint
 
 
 ArcType = _namedtuple('Arc', ['input_label', 'output_label', 'nextstate', 'weight'])
+PathType = _namedtuple('Path', ['input_path', 'output_path', 'weight'])
 
 
 class AbstractSemiringWeight(object):
@@ -155,7 +156,14 @@ class FST(object):
     """
 
     def __init__(self, semiring_class=None, acceptor=False, string_mapper=None, _fst=None):
-        if not semiring_class:
+        if isinstance(semiring_class, str):
+            # handle special case where we are dealing with a string construction
+            # just build a BooleanFST that can be composed with other machines
+            _fst = FST(BooleanSemiringWeight).create_from_string(semiring_class)._fst
+            semiring_class = BooleanSemiringWeight
+            acceptor = True
+            string_mapper = chr
+        elif not semiring_class:
             semiring_class = PythonValueSemiringWeight
         else:
             assert issubclass(semiring_class, AbstractSemiringWeight)
@@ -556,8 +564,14 @@ class FST(object):
 
         http://www.openfst.org/twiki/bin/view/FST/IntersectDoc
         """
-        self._check_same_fst(other)
-        return self.constructor(self._fst.Intersect(other._fst))
+        s = self
+        if other.semiring is BooleanSemiringWeight:
+            if s.semiring is not BooleanSemiringWeight:
+                other = other.lift(s.semiring)
+        elif s.semiring is BooleanSemiringWeight:
+            s = s.lift(other.semiring)
+        s._check_same_fst(other)
+        return s.constructor(s._fst.Intersect(other._fst))
 
     def push(self, towards='initial'):
         """
@@ -739,6 +753,39 @@ class FST(object):
         with weight a.Reverse().
         """
         return self.constructor(self._fst.Reverse())
+
+    def get_paths(self, start=None):
+        """
+        Return an iterator over paths through the FST.
+        Each path is of the PathType and contains the (input sequence, output sequence, path weight sum)
+        """
+        if start is None:
+            start = self.initial_state
+        zero = self.semiring_zero
+        if self._string_mapper is None:
+            mapper = lambda x: x
+        elif self._string_mapper is chr:
+            def mapper(x):
+                return ''.join([chr(y) for y in x])
+        else:
+            def mapper(x):
+                return tuple([self._string_mapper(y) for y in x])
+
+        def iterate_state(state):
+            for input_label, output_label, nextstate, weight in self.get_arcs(state):
+                if zero != weight:
+                    if nextstate == -1:
+                        # this is a final state, yield an empty input and output label to get to here
+                        yield (tuple(), tuple(), weight)
+                    else:
+                        for input_path, output_path, sweight in iterate_state(nextstate):
+                            if input_label != 0:
+                                input_path = (input_label,) + input_path
+                            if output_label != 0:
+                                output_path = (output_label,) + output_path
+                            yield (input_path, output_path, weight + sweight)
+        for input_path, output_path, weight in iterate_state(start):
+            yield PathType(mapper(input_path), mapper(output_path), weight)
 
     def __str__(self):
         if self.num_states < 10 and sum(self.num_arcs(s) for s in range(self.num_states)) < 300:
