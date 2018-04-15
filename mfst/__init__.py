@@ -454,8 +454,8 @@ class FST(object):
             if target_semiring is not BooleanSemiringWeight:
                 break
         if target_semiring is not BooleanSemiringWeight:
-            fsts = [f if f.semiring is not BooleanSemiringWeight else
-                    f.determinize().lift(target_semiring)
+            fsts = [f if not (f.semiring is BooleanSemiringWeight and f._acceptor) else
+                    f.disambiguate().lift(target_semiring)
                     for f in fsts]
         s, *others = fsts
         for fst in others:
@@ -565,11 +565,11 @@ class FST(object):
         http://www.openfst.org/twiki/bin/view/FST/IntersectDoc
         """
         s = self
-        if other.semiring is BooleanSemiringWeight:
+        if other.semiring is BooleanSemiringWeight and other._acceptor:
             if s.semiring is not BooleanSemiringWeight:
-                other = other.lift(s.semiring)
-        elif s.semiring is BooleanSemiringWeight:
-            s = s.lift(other.semiring)
+                other = other.disambiguate().lift(s.semiring)
+        elif s.semiring is BooleanSemiringWeight and s._acceptor:
+            s = s.disambiguate().lift(other.semiring)
         s._check_same_fst(other)
         return s.constructor(s._fst.Intersect(other._fst))
 
@@ -754,13 +754,17 @@ class FST(object):
         """
         return self.constructor(self._fst.Reverse())
 
-    def get_paths(self, start=None):
+    def iterate_paths(self, start=None):
         """
         Return an iterator over paths through the FST.
         Each path is of the PathType and contains the (input sequence, output sequence, path weight sum)
         """
         if start is None:
             start = self.initial_state
+
+        # basic sanity check before we start trying to construct lists of states
+        assert self.verify()
+
         zero = self.semiring_zero
         if self._string_mapper is None:
             mapper = lambda x: x
@@ -771,21 +775,28 @@ class FST(object):
             def mapper(x):
                 return tuple([self._string_mapper(y) for y in x])
 
-        def iterate_state(state):
+        # run BFS
+        queue = [(tuple(), tuple(), zero, start)]
+
+        while len(queue) > 0:
+            input_path, output_path, sweight, state = queue.pop(0)
             for input_label, output_label, nextstate, weight in self.get_arcs(state):
                 if zero != weight:
                     if nextstate == -1:
-                        # this is a final state, yield an empty input and output label to get to here
-                        yield (tuple(), tuple(), weight)
+                        # this is a final state
+                        yield PathType(mapper(input_path), mapper(output_path), sweight + weight)
                     else:
-                        for input_path, output_path, sweight in iterate_state(nextstate):
-                            if input_label != 0:
-                                input_path = (input_label,) + input_path
-                            if output_label != 0:
-                                output_path = (output_label,) + output_path
-                            yield (input_path, output_path, weight + sweight)
-        for input_path, output_path, weight in iterate_state(start):
-            yield PathType(mapper(input_path), mapper(output_path), weight)
+                        ip = input_path
+                        op = output_path
+                        if input_label != 0:
+                            ip += (input_label,)
+                        if output_label != 0:
+                            op += (output_label,)
+                        queue.append((
+                            ip, op,
+                            sweight + weight,
+                            nextstate
+                        ))
 
     def __str__(self):
         if self.num_states < 10 and sum(self.num_arcs(s) for s in range(self.num_states)) < 300:
