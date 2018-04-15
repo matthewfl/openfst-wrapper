@@ -52,6 +52,7 @@
 #include <fst/disambiguate.h>
 #include <fst/verify.h>
 #include <fst/closure.h>
+#include <fst/reverse.h>
 
 #include <fst/script/print.h>
 
@@ -832,6 +833,7 @@ void define_class(pybind11::module &m, const char *name) {
     .def("Prune", [](const PyFST<S> &a, py::object weight) {
         ErrorCatcher e;
         FSTWeight<S> weight_threshold(weight);
+
         unique_ptr<PyFST<S> > ret(new PyFST<S>());
         Prune(a, ret.get(), weight_threshold);
         return ret;
@@ -866,8 +868,9 @@ void define_class(pybind11::module &m, const char *name) {
         return ret;
       })
 
-    .def("Push", [](const PyFST<S> &a, int mode) {
+    .def("Push", [](const PyFST<S> &a, py::object semiring, int mode) {
         ErrorCatcher e;
+        StaticPythonWeights w(semiring);
         unique_ptr<PyFST<S> > ret(new PyFST<S>());
         if(mode == 0) {
           Push<PyArc<S>, REWEIGHT_TO_INITIAL>(a, ret.get(), kPushWeights);
@@ -877,8 +880,9 @@ void define_class(pybind11::module &m, const char *name) {
         return ret;
       })
 
-    .def("ShortestPath", [](const PyFST<S> &a, int count) {
+    .def("ShortestPath", [](const PyFST<S> &a, py::object semiring, int count) {
         ErrorCatcher e;
+        StaticPythonWeights w(semiring);
         unique_ptr<PyFST<S> > ret(new PyFST<S>());
 
         ShortestPath(a, ret.get(), count);
@@ -917,8 +921,9 @@ void define_class(pybind11::module &m, const char *name) {
         return ret;
       })
 
-    .def("RmEpsilon", [](const PyFST<S> &a) {
+    .def("RmEpsilon", [](const PyFST<S> &a, py::object semiring) {
         ErrorCatcher e;
+        StaticPythonWeights w(semiring);
         unique_ptr<PyFST<S> > ret(a.Copy());
         RmEpsilon(ret.get());
         return ret;
@@ -947,6 +952,13 @@ void define_class(pybind11::module &m, const char *name) {
         ErrorCatcher e;
         unique_ptr<PyFST<S> > ret(a.Copy());
         Closure(ret.get(), mode == 0 ? CLOSURE_STAR : CLOSURE_PLUS);
+        return ret;
+      })
+
+    .def("Reverse", [](const PyFST<S> &a) {
+        ErrorCatcher e;
+        unique_ptr<PyFST<S> > ret(new PyFST<S>());
+        Reverse(a, ret.get());
         return ret;
       })
 

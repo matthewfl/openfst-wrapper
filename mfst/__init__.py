@@ -558,7 +558,7 @@ class FST(object):
             t = 0
         else:
             raise RuntimeError("Unknown direction for weight pushing")
-        return self.constructor(self._fst.Push(t))
+        return self.constructor(self._fst.Push(self._semiring_class, t))
 
     def minimize(self, delta=1./1024):
         """
@@ -603,7 +603,7 @@ class FST(object):
         This uses the ShortestFirstQueue.  It works in the case that there are cycles
         and no negative weights
         """
-        return self.constructor(self._fst.ShortestPath(count))
+        return self.constructor(self._fst.ShortestPath(self._semiring_class, count))
 
     def shortest_distance(self, reverse=False):
         """
@@ -656,7 +656,7 @@ class FST(object):
 
         http://www.openfst.org/twiki/bin/view/FST/RmEpsilonDoc
         """
-        return self.constructor(self._fst.RmEpsilon())
+        return self.constructor(self._fst.RmEpsilon(self._semiring_class))
 
     def lift(self, semiring=None, converter=None):
         """
@@ -713,6 +713,14 @@ class FST(object):
         else:
             raise RuntimeError('closure expects mode of star or plus')
         return self.constructor(self._fst.Closure(t))
+
+    def reverse(self):
+        """
+        This operation reverses an FST. If A transduces string x to y with weight a,
+        then the reverse of A transduces the reverse of x to the reverse of y
+        with weight a.Reverse().
+        """
+        return self.constructor(self._fst.Reverse())
 
     def __str__(self):
         if self.num_states < 10 and sum(self.num_arcs(s) for s in range(self.num_states)) < 300:

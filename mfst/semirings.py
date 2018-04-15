@@ -182,3 +182,49 @@ class TropicalSemiringWeight(MinPlusSemiringWeight):
 # static semiring zero and one elements
 TropicalSemiringWeight.zero = TropicalSemiringWeight(float('inf'))
 TropicalSemiringWeight.one = TropicalSemiringWeight(0)
+
+
+class BooleanSemiringWeight(PythonValueSemiringWeight):
+    """
+    Boolean Semiring with two elements True and False
+    """
+
+    semiring_properties = 'path'
+
+    def __init__(self, v):
+        assert isinstance(v, bool)
+        super().__init__(v)
+
+    def sampling_weight(self):
+        if self.value:
+            return 1
+        return 0
+
+    def approx_eq(self, other, delta):
+        return self.value == other.value
+
+    def __add__(self, other):
+        # logical or
+        if self.value:
+            return self
+        return other
+
+    def __mul__(self, other):
+        # logical and
+        if not self.value:
+            return self
+        return other
+
+    def __div__(self, other):
+        if not other.value:
+            raise ZeroDivisionError()
+        return self
+
+    def __pow__(self, n):
+        return self
+
+    def __bool__(self):
+        return self.value
+
+BooleanSemiringWeight.zero = BooleanSemiringWeight(False)
+BooleanSemiringWeight.one = BooleanSemiringWeight(True)

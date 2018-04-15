@@ -150,7 +150,7 @@ assert hc.shortest_path().num_states > 0
 from mfst import semirings
 
 for s in dir(semirings):
-    if s.startswith('_') or s == 'AbstractSemiringWeight':
+    if s.startswith('_') or s == 'AbstractSemiringWeight' or s == 'BooleanSemiringWeight':
         continue
     ss = getattr(semirings, s)
 
@@ -158,6 +158,7 @@ for s in dir(semirings):
     build_hc_fst(fst)
     fst.determinize()  # just do some operation to check that the semiring seems ok
 
+mfst.FST(semirings.BooleanSemiringWeight).create_from_string('test123').push()
 
 
 print('done')
