@@ -975,14 +975,14 @@ void define_class(pybind11::module &m, const char *name) {
           // that will still be ok
           const FSTWeight<S> &w = v.weight;
           py::object oo = w.PythonObject();
-          ret.push_back(make_tuple(v.ilabel, v.olabel, v.nextstate, oo));
+          ret.push_back(py::make_tuple(v.ilabel, v.olabel, v.nextstate, oo));
           iter.Next();
         }
 
         FSTWeight<S> finalW = a.Final(state);
         if(finalW.flags != FSTWeight<S>::isZero && finalW.flags != FSTWeight<S>::isNoWeight) {
           // then there is something here that we should push I guess?
-          ret.push_back(make_tuple(0, 0, -1, finalW.PythonObject()));
+          ret.push_back(py::make_tuple(0, 0, -1, finalW.PythonObject()));
         }
 
         return ret;
