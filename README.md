@@ -1,10 +1,11 @@
-# OpenFST wrapper that supports custom semirings and iPython notebooks
+# OpenFst wrapper that supports custom semirings and Jupyter notebooks
 
-Documentation in `mfst/__init__.py`
-Example in `t.py`
+To see examples of mFST, check out the paper on arXiv [here](https://arxiv.org/abs/2012.03437).
+
+Documentation for mFST can be found in [`mfst/__init__.py`](mfst/__init__.py).
 
 Install:
-    ```
-    pip install 'git+https://github.com/matthewfl/openfst-wrapper.git'
-    ```
-This command will take about 5 minutes without printing anything
+
+```bash
+pip install 'git+https://github.com/matthewfl/openfst-wrapper.git'
+```

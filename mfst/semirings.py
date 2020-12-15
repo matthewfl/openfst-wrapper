@@ -28,7 +28,6 @@ class PythonValueSemiringWeight(AbstractSemiringWeight):
 
     def _create(self, v):
         r = type(self)(v)
-        assert type(self) is type(r)
         return r
 
     def __add__(self, other):
@@ -146,7 +145,7 @@ class MaxPlusSemiringWeight(RealSemiringWeight):
     # let self.value be the path length of this edge
 
     def __add__(self, other):
-        # Return the min value between these two weights
+        # Return the max value between these two weights
         if self.value > other.value:
             return self
         else:

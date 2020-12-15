@@ -64,11 +64,11 @@ namespace py = pybind11;
 // this error should just become a runtime error in python land
 class fsterror : public std::exception {
 private:
-  const char* error;
   string str;
+  const char* error;
 public:
   fsterror(const char *e): error(e) {}
-  fsterror(string s) : str(s), error(s.c_str()) { }
+  fsterror(string s) : str(s), error(str.c_str()) { }
   virtual const char* what() { return error; }
 };
 
@@ -89,7 +89,7 @@ public:
     if(!e.empty() && std::current_exception() == nullptr &&
        !std::uncaught_exception() && PyErr_Occurred() == nullptr) {
       PyErr_SetString(PyExc_RuntimeError, e.c_str());
-      //throw fsterror(e);
+      //throw fsterror(e);  // TODO: try this again to see if this will work
       throw py::error_already_set();
     }
   }
@@ -122,8 +122,11 @@ class StaticPythonWeights {
 private:
   //py::handle old;
   py::handle semiring_class;
-  py::object one_cache;
-  py::object zero_cache;
+  StaticPythonWeights *old;
+
+  // // TODO maybe remove?
+  // py::object one_cache;
+  // py::object zero_cache;
 
   static StaticPythonWeights *active;
 
@@ -134,15 +137,16 @@ public:
     }
     //old = semiring_class;
     semiring_class = semiring;
-    assert(active == nullptr);
+    old = active;
+    assert(active == nullptr); // TODO allow for nested static weight classes
     active = this;
   }
   ~StaticPythonWeights() {
     assert(active == this);
-    active = nullptr;
+    active = old;
     semiring_class = nullptr;
-    one_cache.release();
-    zero_cache.release();
+    // one_cache.release();
+    // zero_cache.release();
   }
 
   static bool contains() {
@@ -152,16 +156,18 @@ public:
   static py::object One() {
     // should have already checked
     //if(active->one_cache.ptr() == nullptr) {
-      active->one_cache = active->semiring_class.attr("one");
-      //}
-    return active->one_cache;
+    return active->semiring_class.attr("one");
+    // active->one_cache =
+    //   //}
+    // return active->one_cache;
   }
 
   static py::object Zero() {
     //if(active->zero_cache.ptr() == nullptr) {
-      active->zero_cache = active->semiring_class.attr("zero");
-      //}
-    return active->zero_cache;
+    return active->semiring_class.attr("zero");
+    // active->zero_cache =
+    //   //}
+    // return active->zero_cache;
   }
 };
 
@@ -180,12 +186,16 @@ public:
     isOne = 0x2,
     isNoWeight = 0x4,
     isSet = 0x8,
-    isCount = 0x10,
+    isCount = 0x10,  // TODO remove
   };
 
-  // the python object that we are wrapping
+
   int16_t flags;
+
+  // the python object that we are wrapping
   py::object impl;
+
+  // TODO remove
   uint32 count;  // represents a count in the case that it added two elements of the static semiring
 
   FSTWeight() : flags(isZero), impl(), count(0) {
@@ -232,11 +242,11 @@ public:
     return type;
   }
 
-  // this might not be what the user wants to use for this???
-  // this has to be a constexpr which means that we can't change it from python
+  // controlled by the template parameter which can be somewhat choosen via
+  // different classes from python
+  // see define_class
   static constexpr uint64 Properties () {
     return S;
-    //return kSemiring | kCommutative | kPath;
   }
 
   bool Member() const {
@@ -760,7 +770,7 @@ void define_class(pybind11::module &m, const char *name) {
         return Isomorphic(a, b, delta);
       })
 
-    // methods that will generate a new FST or
+    // methods that will generate a new FST
     .def("Concat", [](const PyFST<S> &a, const PyFST<S> &b) {
         ErrorCatcher e;
         unique_ptr<PyFST<S> > ret(b.Copy());
@@ -970,9 +980,6 @@ void define_class(pybind11::module &m, const char *name) {
         ArcIterator<PyFST<S> > iter(a, state);
         while(!iter.Done()) {
           auto &v = iter.Value();
-          //assert(v.weight.flags == FSTWeight<S>::isSet);
-          // we are just returning the pure python object, so if it gets held
-          // that will still be ok
           const FSTWeight<S> &w = v.weight;
           py::object oo = w.PythonObject();
           ret.push_back(py::make_tuple(v.ilabel, v.olabel, v.nextstate, oo));

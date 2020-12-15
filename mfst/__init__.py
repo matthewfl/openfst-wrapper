@@ -1,6 +1,6 @@
 # Written by Matthew Francis-Landau (2018)
 #
-# Wrapper for OpenFST that supports defining custom semirings in python
+# Wrapper for OpenFst that supports defining custom semirings in python
 # and drawing FSTs in ipython notebooks
 
 
@@ -74,7 +74,7 @@ class AbstractSemiringWeight(object):
         Checks if the current instance is a member of the semiring
         (Eg float is not nan)
 
-        Called from openFST
+        Called from openFst
         """
         return True
 
@@ -128,7 +128,7 @@ class AbstractSemiringWeight(object):
 
     def openfst_str(self):
         """
-        Returns a string that is used by OpenFST when performing ToString operations
+        Returns a string that is used by OpenFst when performing ToString operations
         """
         return str(self)
 
@@ -140,6 +140,7 @@ class AbstractSemiringWeight(object):
 
     def __bool__(self):
         return not (self == self.zero)
+
 
 from . import semirings
 from .semirings import (
@@ -178,14 +179,12 @@ class FST(object):
         assert zero is not None and isinstance(zero, semiring_class), "Zero weight not set for semiring"
         assert one  is not None and isinstance(one , semiring_class), "One weight not set for semiring"
 
-        assert isinstance(zero, semiring_class)
-        assert isinstance(one , semiring_class)
-        assert isinstance(zero + one, semiring_class)
-        assert isinstance(zero * one, semiring_class)
+        assert isinstance(zero + one, semiring_class), "Semiring operator + returns the wrong type"
+        assert isinstance(zero * one, semiring_class), "Semiring operator * returns the wrong type"
 
         self._semiring_class = semiring_class
 
-        if _fst:
+        if _fst is not None:
             self._fst = _fst
         else:
             self._fst = {
@@ -201,8 +200,6 @@ class FST(object):
         # and passing that through ord() and chr() to print them in the graphics that we are drawing.  So if that is being
         # used, then this will get set to true inside of add_arc
         self._string_mapper = string_mapper
-        # number of times that we have drawn this FST
-        self._draw_count = 0
 
     def _make_weight(self, w):
         if isinstance(w, self._semiring_class):
@@ -221,12 +218,12 @@ class FST(object):
     def _check_same_fst(self, other):
         """Check that the other fst is the same type as us, otherwise we will run into problems"""
         assert isinstance(other, FST)
-        assert type(self._fst) is type(other._fst), "Can not mix FSTs with different properties"
         assert self._semiring_class is other._semiring_class, "Can not mix FSTs with different semirings.  Use FST.lift to change between semirings"
+        assert type(self._fst) is type(other._fst), "Can not mix FSTs with different properties"
 
     def constructor(self, _fst=None, **kwargs):
         """Return a new instance of the FST using the same parameters"""
-        if _fst:
+        if _fst is not None:
             assert type(_fst) is type(self._fst), "type of fst differs from our own type"
         else:
             _fst = type(self._fst)()
@@ -279,7 +276,7 @@ class FST(object):
         seen = set()
         ret = []
 
-        if self._string_mapper:
+        if self._string_mapper is not None:
             mapper = self._string_mapper
         else:
             mapper = lambda x: x
@@ -355,12 +352,12 @@ class FST(object):
         if isinstance(input_label, str):
             assert len(input_label) == 1, "FST string labels can only be a single character"
             input_label = ord(input_label)
-            if not self._string_mapper:
+            if self._string_mapper is None:
                 self._string_mapper = chr
         if isinstance(output_label, str):
             assert len(output_label) == 1, "FST string labels can only be a single character"
             output_label = ord(output_label)
-            if not self._string_mapper:
+            if self._string_mapper is None:
                 self._string_mapper = chr
         if self._acceptor:
             # acceptors are machines with the same input and output label
@@ -386,7 +383,7 @@ class FST(object):
 
     def set_final_weight(self, state, weight='__FST_ONE__'):
         """
-        Set the weight that this state transisions to the final state
+        Set the weight that this state transisions to the final state (default weight 1)
         """
         assert (state >= 0 and state < self.num_states), "Invalid state id"
         return self._fst.SetFinal(state, self._make_weight(weight))
@@ -430,7 +427,7 @@ class FST(object):
         This operation computes the concatenation (product) of two FSTs. If A
         transduces string x to y with weight a and B transduces string w to v
         with weight b, then their concatenation transduces string xw to yv with
-        weight a (times) b.
+        weight a (otimes) b.
 
         http://www.openfst.org/twiki/bin/view/FST/ConcatDoc
         """
@@ -441,7 +438,7 @@ class FST(object):
         """
         This operation computes the composition of two transducers. If A transduces
         string x to y with weight a and B transduces y to z with weight b, then their
-        composition transduces string x to z with weight a (times) b.
+        composition transduces string x to z with weight a (otimes) b.
 
         http://www.openfst.org/twiki/bin/view/FST/ComposeDoc
 
@@ -502,19 +499,19 @@ class FST(object):
         """
         return self.constructor(self._fst.Disambiguate(self._semiring_class))
 
-    def project(self, type='input'):
+    def project(self, side='input'):
         """
         This operation projects an FST onto its domain or range by either copying
         each arc's input label to its output label or vice versa.
 
         http://www.openfst.org/twiki/bin/view/FST/ProjectDoc
         """
-        if type == 'output':
+        if side == 'output':
             t = 0
-        elif type == 'input':
+        elif side == 'input':
             t = 1
         else:
-            raise RuntimeError("unknown project type " + type)
+            raise RuntimeError("Unknown project side, expected input or output labels")
         return self.constructor(self._fst.Project(t))
 
     def difference(self, other):
@@ -541,7 +538,7 @@ class FST(object):
         """
         This operation deletes states and arcs in the input FST that do not belong
         to a successful path whose weight is no more (w.r.t the natural the
-        natural semiring order) than the threshold t otimes the weight of the
+        natural semiring order) than the threshold t (otimes) the weight of the
         shortest path in the input FST.
 
         http://www.openfst.org/twiki/bin/view/FST/PruneDoc
@@ -583,12 +580,12 @@ class FST(object):
 
         http://www.openfst.org/twiki/bin/view/FST/PushDoc
         """
-        if towards == 'final':
-            t = 1
-        elif towards == 'initial':
+        if towards == 'initial':
             t = 0
+        elif towards == 'final':
+            t = 1
         else:
-            raise RuntimeError("Unknown direction for weight pushing")
+            raise RuntimeError("Unknown direction for weight pushing, expected final or initial")
         return self.constructor(self._fst.Push(self._semiring_class, t))
 
     def minimize(self, delta=1./1024):
@@ -641,7 +638,7 @@ class FST(object):
         This operation computes the shortest distance from the initial state to
         every state (when reverse is false) or from every state to the final
         states (when reverse is true). The shortest distance from p to q is the
-        oplus-sum of the weights of all the paths between p and q.
+        (oplus)-sum of the weights of all the paths between p and q.
         """
         return [self._make_weight(w) for w in self._fst.ShortestDistance(reverse)]
 
@@ -773,15 +770,15 @@ class FST(object):
             mapper = lambda x: x
         elif self._string_mapper is chr:
             def mapper(x):
-                return ''.join([chr(y) for y in x])
+                return ''.join(chr(y) for y in x)
         else:
             def mapper(x):
-                return tuple([self._string_mapper(y) for y in x])
+                return tuple(self._string_mapper(y) for y in x)
 
         # run BFS
         queue = [(tuple(), tuple(), self.semiring_one, start)]
 
-        while len(queue) > 0:
+        while queue:
             input_path, output_path, sweight, state = queue.pop(0)
             for input_label, output_label, nextstate, weight in self.get_arcs(state):
                 if zero != weight:
@@ -823,12 +820,15 @@ class FST(object):
         """
         # mostly copied from dagre-d3 tutorial / demos
         from uuid import uuid4
-        #from hashlib import md5
         import json
         from collections import defaultdict
         ret = []
         if self.num_states == 0:
             return '<code>Empty FST</code>'
+
+        if self.num_states > 1200:
+            return f'FST too large to draw graphic, use fst.full_str()<br /><code>FST(num_states={self.num_states})</code>'
+
         # sigh...loading these as external files
         # ipython is loading with require js
 
@@ -855,7 +855,7 @@ class FST(object):
                 # make the final states red
                 ret.append(f'g.node("state_{sid}").style = "fill: #f77"; \n')
 
-        if self._string_mapper:
+        if self._string_mapper is not None:
             if self._string_mapper is chr:
                 def make_label(x):
                     if x == 32:
@@ -897,7 +897,7 @@ class FST(object):
 
         if initial_state >= 0:
             # make the start state green
-            ret.append(f'g.node("state_{self.initial_state}").style = "fill: #7f7"; \n')
+            ret.append(f'g.node("state_{initial_state}").style = "fill: #7f7"; \n')
 
         # if the machine is too big, do not attempt to make ipython display it
         # otherwise it ends up crashing and stuff...
@@ -920,21 +920,6 @@ class FST(object):
         require(['d3', 'dagreD3'], function() {});
         } catch (e) {}
         </script>
-        <!--script>
-        (function() {
-        if(typeof d3 == "undefined") {
-        var script   = document.createElement("script");
-        script.type  = "text/javascript";
-        script.src   = "https://cdnjs.cloudflare.com/ajax/libs/d3/4.13.0/d3.js";
-        document.body.appendChild(script);
-
-        var script   = document.createElement("script");
-        script.type  = "text/javascript";
-        script.src   = "https://cdnjs.cloudflare.com/ajax/libs/dagre-d3/0.6.1/dagre-d3.min.js";
-        document.body.appendChild(script);
-        }
-        })();
-        </script-->
         <style>
         .node rect,
         .node circle,
@@ -954,9 +939,6 @@ class FST(object):
 
 
         obj = 'fst_' + uuid4().hex
-        #ms = md5(ret.encode('ascii', 'ignore')).hexdigest()
-        #obj = f'fst_{self._draw_count}_{ms}'
-        self._draw_count += 1
         ret2.append(f'<center><svg width="850" height="600" id="{obj}"><g/></svg></center>')
         ret2.append('''
         <script>
