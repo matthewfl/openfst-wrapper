@@ -114,7 +114,7 @@ class BuildExt(build_ext):
 setup(
     name='mfl-openfst',
     version='0.0.1',
-    description='Wrap OpenFST with support for defining a custom weight semiring',
+    description='OpenFst wrapper that supports custom semirings and Jupyter notebooks',
     author='Matthew Francis-Landau',
     author_email='matthew@matthewfl.com',
     packages=['mfst'],

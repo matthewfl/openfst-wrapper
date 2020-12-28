@@ -1,7 +1,7 @@
 /**
    Written by Matthew Francis-Landau (2018)
 
-   Wrapper for OpenFST that supports defining custom semirings in python
+   Wrapper for OpenFst that supports defining custom semirings in python
    and drawing FSTs in ipython notebooks
 */
 
@@ -22,6 +22,7 @@
 #ifdef __GNUC__
 // openfst causes this warning to go off a lot
 #pragma GCC diagnostic ignored "-Wsign-compare"
+#pragma GCC diagnostic ignored "-Wreorder"
 #endif
 
 #include <fst/fst.h>
@@ -175,9 +176,9 @@ StaticPythonWeights* StaticPythonWeights::active = nullptr;
 
 
 template<uint64 S>
-class FSTWeight {
+class FSTWeight final {
 private:
-  FSTWeight(int32 g, bool __) : flags(g), impl(), count(0) {} // the static value constructor
+  FSTWeight(int32 g, bool __) : flags(g), impl() {} // the static value constructor
 public:
   using ReverseWeight = FSTWeight<S>;
 
@@ -186,45 +187,29 @@ public:
     isOne = 0x2,
     isNoWeight = 0x4,
     isSet = 0x8,
-    isCount = 0x10,  // TODO remove
   };
-
-
-  int16_t flags;
 
   // the python object that we are wrapping
   py::object impl;
 
-  // TODO remove
-  uint32 count;  // represents a count in the case that it added two elements of the static semiring
+  int16_t flags;
 
-  FSTWeight() : flags(isZero), impl(), count(0) {
-  }
 
-  FSTWeight(uint32 count) : flags(isCount), count(count) {
-    throw fsterror("don't use the counting weights on the fst");
-    assert(count > 0);
-    if(count  == 0)
-      throw fsterror("Invalid static count");
-  }
+  FSTWeight() : flags(isZero), impl() {}
 
-  FSTWeight(py::object i) : flags(isSet), impl(i), count(0) {
+
+  FSTWeight(py::object i) : flags(isSet), impl(i) {
     if(!check_is_weight(impl))
       throw fsterror("Value does not implement Weight interface");
   }
 
+  // these need to be "true" static values, as these are cached by OpenFst as static variables in various places
   static FSTWeight<S> Zero() {
     static const FSTWeight<S> zero = FSTWeight<S>(isZero, true);
-    // if(StaticPythonWeights::contains()) {
-    //   return FSTWeight<S>(StaticPythonWeights::Zero());
-    // }
     return zero;
   }
   static FSTWeight<S> One() {
     static const FSTWeight<S> one = FSTWeight<S>(isOne, true);
-    // if(StaticPythonWeights::contains()) {
-    //   return FSTWeight<S>(StaticPythonWeights::One());
-    // }
     return one;
   }
   static const FSTWeight<S>& NoWeight() {
@@ -234,7 +219,7 @@ public:
 
   bool isBuiltIn() const {
     assert(flags != 0);
-    return (flags & (isZero | isOne | isNoWeight | isCount)) != 0;
+    return (flags & (isZero | isOne | isNoWeight)) != 0;
   }
 
   static const string& Type() {
@@ -251,7 +236,7 @@ public:
 
   bool Member() const {
     if(isBuiltIn()) {
-      return (flags & (isOne | isZero | isCount)) != 0;
+      return (flags & (isOne | isZero)) != 0;
     } else {
       assert(flags == isSet);
       py::object r = impl.attr("member")();
@@ -285,8 +270,6 @@ public:
         return os << "(1)" ;
       } else if(flags == isZero) {
         return os << "(0)";
-      } else if(flags == isCount) {
-        return os << "(" << count << ")";
       } else {
         return os << "(invalid)";
       }
@@ -300,7 +283,7 @@ public:
 
   size_t Hash() const {
     if(isBuiltIn()) {
-      return flags + count;
+      return flags;
     } else {
       return py::hash(impl);
     }
@@ -309,7 +292,6 @@ public:
   FSTWeight<S>& operator=(const FSTWeight<S>& other) {
     impl = other.impl;
     flags = other.flags;
-    count = other.count;
     return *this;
   }
 
@@ -328,15 +310,12 @@ public:
       } else {
         return py::cast("__FST_ZERO__");
       }
-    } else if(flags == isCount) {
-      throw fsterror("trying to statically build counting python object");
     } else {
       return py::cast("__FST_INVALID__");
     }
   }
 
   py::object buildObject(const py::object &other) const {
-    // in the case that we are just wrapping a count, we still want to construct some object
     // that can be used to track the semiring operations
     if(flags == isSet) {
       return impl;
@@ -344,33 +323,14 @@ public:
       return other.attr("one");
     } else if(flags == isZero) {
       return other.attr("zero");
-    } else if(flags == isNoWeight) {
+    } else {
+      assert(flags == isNoWeight);
       // unsure what could be done here
       return py::cast("__FST_INVALID__");
-    } else {
-      assert(flags == isCount);
-      py::object ret = other.attr("zero"); // get the zero element
-      py::object v = other.attr("one");
-      if(!check_is_weight(ret) || !check_is_weight(v))
-        throw fsterror("Operation return non weight");
-      uint32 i = count;
-      // build this object using multiple add instructions as we do not know how the prod and multiply interact with eachother otherwise
-      // TODO: check properties of the semiring and determine if we need to actually do this adding operation
-      while(i) {
-        if(i & 0x1) {
-          ret = ret.attr("__add__")(v);
-        }
-        i >>= 1;
-        if(!i) break;
-        v = v.attr("__add__")(v);
-      }
-      if(!check_is_weight(ret))
-        throw fsterror("Operation return non weight");
-      return ret;
     }
   }
 
-  virtual ~FSTWeight<S>() {
+  ~FSTWeight<S>() {
     //cout << "delete weight\n";
   }
 
@@ -388,7 +348,6 @@ FSTWeight<S> Plus(const FSTWeight<S> &w1, const FSTWeight<S> &w2) {
     return w1;
   }
   if(w1.flags == FSTWeight<S>::isOne && w2.flags == FSTWeight<S>::isOne) {
-    //return FSTWeight<S>(2); // the counting element
     // TODO: remove the counting weights from the semirings as they are awkward and a bad idea..
     if(StaticPythonWeights::contains()) {
       // this can just return the two object
@@ -400,9 +359,7 @@ FSTWeight<S> Plus(const FSTWeight<S> &w1, const FSTWeight<S> &w2) {
   }
   py::object o1 = w1.impl;
   if(w1.flags != FSTWeight<S>::isSet) {
-    if(w2.flags == FSTWeight<S>::isCount) {
-      return FSTWeight<S>(w1.count + w2.count);
-    } else if(w2.flags == FSTWeight<S>::isSet) {
+    if(w2.flags == FSTWeight<S>::isSet) {
       o1 = w1.buildObject(w2.impl);
     } else if(StaticPythonWeights::contains() && w1.flags == FSTWeight<S>::isOne) {
       o1 = StaticPythonWeights::One();
@@ -432,7 +389,7 @@ FSTWeight<S> Times(const FSTWeight<S> &w1, const FSTWeight<S> &w2) {
   py::object o1 = w1.impl;
   if(w1.flags != FSTWeight<S>::isSet) {
     if(w2.flags != FSTWeight<S>::isSet) {
-      throw fsterror("Undefined multiplication between two static count elements of the field");
+      throw fsterror("Undefined multiplication between two static elements of the field");
     } else {
       //assert(w2.flags == FSTWeight<S>::isSet);
       o1 = w1.buildObject(w2.impl);
@@ -454,18 +411,14 @@ FSTWeight<S> Divide(const FSTWeight<S> &w1, const FSTWeight<S> &w2) {
     return FSTWeight<S>::NoWeight();
   }
   py::object o1 = w1.impl;
-  if(w1.flags == FSTWeight<S>::isCount || w1.flags == FSTWeight<S>::isOne) {
+  if(w1.flags == FSTWeight<S>::isOne) {
     if(w2.flags != FSTWeight<S>::isSet) {
-      throw fsterror("Undefined division between two static count elements of the field");
+      throw fsterror("Undefined division between two static elements of the field");
     } else {
-      //assert(w2.flags == FSTWeight<S>::isSet);
       o1 = w1.buildObject(w2.impl);
     }
   }
 
-  // else if(w1.flags != FSTWeigh<S>::isSet) {
-  //   throw fsterror("Unable to divide unset weights");
-  // }
   py::object o2 = w2.buildObject(o1);
 
   return FSTWeight<S>(o1.attr("__div__")(o2));
@@ -481,8 +434,6 @@ inline FSTWeight<S> Divide(const FSTWeight<S> &w1, const FSTWeight<S> &w2, const
 template<uint64 S>
 FSTWeight<S> Power(const FSTWeight<S> &w1, int n) {
   if(w1.isBuiltIn()) {
-    if(w1.flags == FSTWeight<S>::isCount)
-      throw fsterror("Unable to construct power of static count");
     return w1;
   } else {
     return FSTWeight<S>(w1.impl.attr("__pow__")(n));
@@ -500,8 +451,6 @@ bool operator==(FSTWeight<S> const &w1, FSTWeight<S> const &w2) {
     o1 = w1.buildObject(o2);
   } else if(!w1.isBuiltIn() && w2.isBuiltIn()) {
     o2 = w2.buildObject(o1);
-  } else if(w1.flags == FSTWeight<S>::isCount) {
-    return w2.flags == FSTWeight<S>::isCount && w1.count == w2.count;
   } else if(w1.isBuiltIn() && w2.isBuiltIn()) {
     return w1.flags == w2.flags;
   }
@@ -530,8 +479,6 @@ bool ApproxEqual(FSTWeight<S> const &w1, FSTWeight<S> const &w2, const float &de
     o1 = w1.buildObject(o2);
   } else if(!w1.isBuiltIn() && w2.isBuiltIn()) {
     o2 = w2.buildObject(o1);
-  } else if(w1.flags == FSTWeight<S>::isCount) {
-    return w2.flags == FSTWeight<S>::isCount && w1.count == w2.count;
   } else if(w1.isBuiltIn() && w2.isBuiltIn()) {
     return w1.flags == w2.flags;
   }
@@ -576,7 +523,6 @@ public:
   explicit PythonArcSelector(uint64 seed) : random_engine(seed) {}
 
   size_t operator()(const Fst<PyArc<S> > &fst, StateId s) const {
-    //const auto n = fst.NumArcs(s) + (fst.Final(s) != Weight::Zero());
     vector<double> scores;  // the unweighted scores for the arcs
     double sum = 0;
 
@@ -586,6 +532,7 @@ public:
       const FSTWeight<S> &w = v.weight;
       if(w.isBuiltIn()) {
         if(w.flags != FSTWeight<S>::isZero) {
+          // this could be fixed by using the static semiring class on the methods which make use of this
           throw fsterror("Unable to sample from fst that contains static but not zero weights");
         }
         scores.push_back(0);
@@ -629,8 +576,7 @@ public:
   }
 
  private:
-  //mutable std::mt19937_64 rand_;
-  // TODO: this should just be a global that can be seeded at some point?
+  // this is seeded when this class is constructed.  The seed comes from python random.randint
   mutable default_random_engine random_engine;
 
 };
@@ -1006,7 +952,7 @@ void define_class(pybind11::module &m, const char *name) {
 }
 
 PYBIND11_MODULE(openfst_wrapper_backend, m) {
-  m.doc() = "Backing wrapper for OpenFST";
+  m.doc() = "Backing wrapper for OpenFst";
 
   define_class<kSemiring | kCommutative>(m, "FSTBase");
   define_class<kSemiring | kCommutative | kPath | kIdempotent>(m, "FSTPath");

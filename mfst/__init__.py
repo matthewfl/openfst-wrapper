@@ -5,7 +5,7 @@
 
 
 import openfst_wrapper_backend as _backend
-from collections import namedtuple as _namedtuple
+from collections import namedtuple as _namedtuple, deque as _deque
 from random import randint as _randint
 
 
@@ -158,7 +158,7 @@ class FST(object):
     Wraps a mutable FST class
     """
 
-    def __init__(self, semiring_class=None, acceptor=False, string_mapper=None, _fst=None):
+    def __init__(self, semiring_class=None, acceptor=False, string_mapper=None, *, _fst=None):
         if semiring_class is None:
             semiring_class = PythonValueSemiringWeight
         elif type(semiring_class) is not type:
@@ -173,14 +173,15 @@ class FST(object):
         else:
             assert issubclass(semiring_class, AbstractSemiringWeight), "first argument is not iterable or a semiring class"
 
-        # quick sanity check that this implements the semiring class
-        zero = semiring_class.zero
-        one = semiring_class.one
-        assert zero is not None and isinstance(zero, semiring_class), "Zero weight not set for semiring"
-        assert one  is not None and isinstance(one , semiring_class), "One weight not set for semiring"
+        if _fst is None:
+            # quick sanity check that this implements the semiring class
+            zero = semiring_class.zero
+            one = semiring_class.one
+            assert zero is not None and isinstance(zero, semiring_class), "Zero weight not set for semiring"
+            assert one  is not None and isinstance(one , semiring_class), "One weight not set for semiring"
 
-        assert isinstance(zero + one, semiring_class), "Semiring operator + returns the wrong type"
-        assert isinstance(zero * one, semiring_class), "Semiring operator * returns the wrong type"
+            assert isinstance(zero + one, semiring_class), "Semiring operator + returns the wrong type"
+            assert isinstance(zero * one, semiring_class), "Semiring operator * returns the wrong type"
 
         self._semiring_class = semiring_class
 
@@ -776,10 +777,10 @@ class FST(object):
                 return tuple(self._string_mapper(y) for y in x)
 
         # run BFS
-        queue = [(tuple(), tuple(), self.semiring_one, start)]
+        queue = _deque([(tuple(), tuple(), self.semiring_one, start)])
 
         while queue:
-            input_path, output_path, sweight, state = queue.pop(0)
+            input_path, output_path, sweight, state = queue.popleft()
             for input_label, output_label, nextstate, weight in self.get_arcs(state):
                 if zero != weight:
                     if nextstate == -1:
