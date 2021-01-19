@@ -2,16 +2,14 @@ print("here")
 
 import mfst
 
-num_weights = 0
 
 class MyWeight(mfst.AbstractSemiringWeight):
 
     def __init__(self, v=0):
-        global num_weights
         super().__init__()
         print('create', v)
         self._value = v
-        num_weights += 1
+        type(self).num_weights += 1
 
     def __add__(self, other):
         print('hi from add')
@@ -34,13 +32,14 @@ class MyWeight(mfst.AbstractSemiringWeight):
         return self == other
 
     def __del__(self):
-        global num_weights
         print('del', type(self), self._value)
-        num_weights -= 1
+        type(self).num_weights -= 1
 
     def __str__(self):
         print('calling string')#, type(self), dir(self))
         return 'MyWeight({})'.format(self._value)
+
+MyWeight.num_weights = 0
 
 MyWeight.zero = MyWeight(0)
 MyWeight.one = MyWeight(1)
@@ -79,7 +78,7 @@ a = None
 vv = None
 gg = None
 
-assert num_weights == 2 # check that everything got deleted (except the zero and 1 static)
+assert MyWeight.num_weights == 2 # check that everything got deleted (except the zero and 1 static)
 
 
 gg = mfst.FST()
@@ -168,5 +167,11 @@ assert mfst.FST().create_from_string('test123').compose(bs).get_unique_output_st
 
 mfst.FST('test')
 
+
+import pickle
+
+bs2 = pickle.loads(pickle.dumps(bs))
+
+assert bs.isomorphic(bs2)
 
 print('done')

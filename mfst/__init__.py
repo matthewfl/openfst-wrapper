@@ -807,13 +807,44 @@ class FST(object):
             return 'FST(num_states={})'.format(self.num_states)
 
     def full_str(self):
-        return 'FST {\n' + self._fst.ToString() + '\n}'
+        return 'FST {\n' + self._fst.ToString() + '}'
 
     def __repr__(self):
         return str(self)
 
     def __bool__(self):
         return self.num_states > 0
+
+    def __getstate__(self):
+        return {
+            'semiring_class': self._semiring_class,
+            'acceptor': self._acceptor,
+            'string_mapper': self._string_mapper,
+            'num_states': self.num_states,
+            'arcs': [[tuple(x) for x in self.get_arcs(s)] for s in self.states],
+            'initial_state': self.initial_state,
+        }
+
+    def __setstate__(self, d):
+        f = FST(
+            semiring_class=d['semiring_class'],
+            acceptor=d['acceptor'],
+            string_mapper=d['string_mapper'],
+        )
+        self._fst = f._fst
+        self._semiring_class = f._semiring_class
+        self._acceptor = f._acceptor
+        self._string_mapper = f._string_mapper
+        for i in range(d['num_states']):
+            self.add_state()
+        self.initial_state = d['initial_state']
+        for i, arcs in enumerate(d['arcs']):
+            for input_label, output_label, nextstate, weight in arcs:
+                if nextstate == -1:
+                    self.set_final_weight(state=i, weight=weight)
+                else:
+                    self.add_arc(from_state=i, to_state=nextstate, weight=weight,
+                                 input_label=input_label, output_label=output_label)
 
     def _repr_html_(self):
         """

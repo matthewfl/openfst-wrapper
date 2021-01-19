@@ -24,9 +24,8 @@ jobs:
         python t.py
 
 
-
   test-macosx:
-    # mac os x uses clang which is behaves slightly different from gcc used by default on linux
+    # mac os x uses clang which is behaves slightly differently from gcc used on linux
     runs-on: macos-latest
     strategy:
       matrix:
