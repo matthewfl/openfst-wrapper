@@ -848,7 +848,7 @@ class FST(object):
 
     def _repr_html_(self):
         """
-        When returned from an ipython cell, this will generate the FST visualization
+        When returned from a Jupyter cell, this will generate the FST visualization
         """
         # mostly copied from dagre-d3 tutorial / demos
         from uuid import uuid4
@@ -860,9 +860,6 @@ class FST(object):
 
         if self.num_states > 1200:
             return f'FST too large to draw graphic, use fst.full_str()<br /><code>FST(num_states={self.num_states})</code>'
-
-        # sigh...loading these as external files
-        # ipython is loading with require js
 
         # here we are actually going to read the states from the FST and generate nodes for them
         # in the output source code
@@ -931,7 +928,7 @@ class FST(object):
             # make the start state green
             ret.append(f'g.node("state_{initial_state}").style = "fill: #7f7"; \n')
 
-        # if the machine is too big, do not attempt to make ipython display it
+        # if the machine is too big, do not attempt to make the web browser display it
         # otherwise it ends up crashing and stuff...
         if len(ret) > 1200:
             return f'FST too large to draw graphic, use fst.full_str()<br /><code>FST(num_states={self.num_states})</code>'
@@ -939,12 +936,21 @@ class FST(object):
 
         ret2 = ['''
         <script>
+        try {
         require.config({
         paths: {
         "d3": "https://cdnjs.cloudflare.com/ajax/libs/d3/4.13.0/d3",
         "dagreD3": "https://cdnjs.cloudflare.com/ajax/libs/dagre-d3/0.6.1/dagre-d3.min"
         }
         });
+        } catch {
+          ["https://cdnjs.cloudflare.com/ajax/libs/d3/4.13.0/d3.js",
+           "https://cdnjs.cloudflare.com/ajax/libs/dagre-d3/0.6.1/dagre-d3.min.js"].forEach(function (src) {
+            var tag = document.createElement('script');
+            tag.src = src;
+            document.body.appendChild(tag);
+          })
+        }
         try {
         requirejs(['d3', 'dagreD3'], function() {});
         } catch (e) {}
@@ -976,10 +982,19 @@ class FST(object):
         <script>
         (function render_d3() {
         var d3, dagreD3;
-        try {
-        d3 = require('d3');
-        dagreD3 = require('dagreD3');
-        } catch (e) { setTimeout(render_d3, 50); return; } // requirejs is broken on external domains
+        try { // requirejs is broken on external domains
+          d3 = require('d3');
+          dagreD3 = require('dagreD3');
+        } catch (e) {
+          // for google colab
+          if(typeof window.d3 !== "undefined" && typeof window.dagreD3 !== "undefined") {
+            d3 = window.d3;
+            dagreD3 = window.dagreD3;
+          } else { // not loaded yet, so wait and try again
+            setTimeout(render_d3, 50);
+            return;
+          }
+        }
         //alert("loaded");
         var g = new dagreD3.graphlib.Graph().setGraph({ 'rankdir': 'LR' });
         ''')
