@@ -935,7 +935,7 @@ class FST(object):
                 if arc.nextstate == -1:
                     continue
 
-                label = 'L:'
+                label = ''
                 if arc.input_label == 0:
                     label += '\u03B5'  # epsilon
                 else:
@@ -945,6 +945,7 @@ class FST(object):
                 else:
                     olabel = make_olabel(arc.output_label)
                 
+                print(label+' '+olabel)
                 if label != olabel:
                     label += ':'+olabel
                 
