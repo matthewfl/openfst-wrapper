@@ -940,12 +940,14 @@ class FST(object):
                     label += '\u03B5'  # epsilon
                 else:
                     label += make_label(arc.input_label)
-                if arc.input_label != arc.output_label:
-                    label += ':'
-                    if arc.output_label == 0:
-                        label += '\u03B5'
-                    else:
-                        label += make_olabel(arc.output_label)
+                if arc.output_label == 0:
+                    olabel = '\u03B5'  # epsilon
+                else:
+                    olabel = make_olabel(arc.output_label)
+                
+                if label != olabel:
+                    label += ':'+olabel
+                
                 if one != arc.weight:
                     label += f'/{arc.weight}'
                 to[arc.nextstate].append(label)
