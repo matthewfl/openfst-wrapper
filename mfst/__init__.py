@@ -1106,8 +1106,9 @@ def compiler(strings,isymbols=None,osymbols=None,acceptor=False,add_symbols=True
         isymbols=SymbolTable(mutableOnFly=add_symbols)
         isymbols.add_symbol("-")
     if add_symbols and not acceptor and osymbols is None:
-        osymbols=isymbols   #  this is to handle bug in printing
-
+        osymbols=SymbolTable(mutableOnFly=add_symbols)   #  this is to handle bug in printing
+        osymbols.add_symbol("-")
+        
     if (acceptor):
         f=FST(acceptor=acceptor,string_mapper=isymbols)
     else:
