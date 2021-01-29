@@ -2,7 +2,9 @@
 #
 # Wrapper for OpenFst that supports defining custom semirings in python
 # and drawing FSTs in ipython notebooks
-
+#
+# Edit 2021 Eric Fosler-Lussier to create SymbolTable class, allow for different input/output symbol tables,
+# allow compilation
 
 import openfst_wrapper_backend as _backend
 from collections import namedtuple as _namedtuple, deque as _deque
@@ -158,7 +160,7 @@ class FST(object):
     Wraps a mutable FST class
     """
 
-    def __init__(self, semiring_class=None, acceptor=False, string_mapper=None, *, _fst=None):
+    def __init__(self, semiring_class=None, acceptor=False, string_mapper=None, output_string_mapper=None, *, _fst=None):
         if semiring_class is None:
             semiring_class = PythonValueSemiringWeight
         elif type(semiring_class) is not type:
@@ -201,6 +203,10 @@ class FST(object):
         # and passing that through ord() and chr() to print them in the graphics that we are drawing.  So if that is being
         # used, then this will get set to true inside of add_arc
         self._string_mapper = string_mapper
+        # add output string mapper, which can also be the same alphabet
+        self._output_string_mapper = output_string_mapper
+        if self._output_string_mapper is None:
+            self._output_string_mapper = string_mapper
 
     def _make_weight(self, w):
         if isinstance(w, self._semiring_class):
@@ -1025,3 +1031,44 @@ class FST(object):
         </script>
         ''')
         return ''.join(ret2)
+
+class SymbolTable():
+    """
+    Creates a symbol table that maps strings to ids; can function as a callable
+    to pass as input to FST constructor.
+    """
+    def __init__(self,mutableOnFly=False,strict=False):
+        self.__sym2id = {}
+        self.__id2sym = {}
+        self.__mutableOnFly = mutableOnFly
+        self.__strict = strict
+
+    def add_symbol(self,sym):
+        if sym in sym2id:
+            if strict:
+                raise Exception('Symbol '+sym+' already in symbol table')
+            return self.__sym2id[sym]
+        newid=len(self.__sym2id)
+        self.__sym2id[sym]=newid
+        self.__id2sym[newid]=sym
+        return newid
+    
+    def get_symbol(self,sym):
+        if sym in sym2id:
+            return sym2id[sym]
+        elif self.__mutableOnFly:
+            return self.add_symbol(sym)
+        else:
+            raise Exception('Symbol '+sym+' not in symbol table')
+
+    def __get_item__(self, sym):
+        return get_symbol(self,sym)
+    
+    def __call__(self,symid):
+        if symid in self.__id2sym:
+            return self.__id2sym[symid]
+        else:
+            return symid
+ 
+
+            
