@@ -927,7 +927,7 @@ class FST(object):
             else:
                 make_olabel = self._output_string_mapper
         else:
-            make_olabel = str
+            make_olabel = make_label
 
         for sid in range(self.num_states):
             to = defaultdict(list)
@@ -935,7 +935,7 @@ class FST(object):
                 if arc.nextstate == -1:
                     continue
 
-                label = ''
+                label = 'L:'
                 if arc.input_label == 0:
                     label += '\u03B5'  # epsilon
                 else:
