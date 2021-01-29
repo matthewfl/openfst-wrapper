@@ -945,7 +945,6 @@ class FST(object):
                 else:
                     olabel = make_olabel(arc.output_label)
                 
-                print(label+' '+olabel)
                 if label != olabel:
                     label += ':'+olabel
                 
@@ -1107,8 +1106,7 @@ def compiler(strings,isymbols=None,osymbols=None,acceptor=False,add_symbols=True
         isymbols=SymbolTable(mutableOnFly=add_symbols)
         isymbols.add_symbol("-")
     if add_symbols and not acceptor and osymbols is None:
-        osymbols=SymbolTable(mutableOnFly=add_symbols)
-        osymbols.add_symbol("-")
+        osymbols=isymbols   #  this is to handle bug in printing
 
     if (acceptor):
         f=FST(acceptor=acceptor,string_mapper=isymbols)
